@@ -1,0 +1,16 @@
+name: "mirror repo projects"
+on: # run this on a cron schedule
+  schedule:
+    - cron: '*/3 * * * *'
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: ./
+      with:
+        sourceColumnId: MDEzOlByb2plY3RDb2x1bW44NTA2NzUz
+        targetColumnId: MDEzOlByb2plY3RDb2x1bW44NTA2NzYw
+        github_token: ${{ secrets.TEST_SECRET }}

@@ -1,8 +1,8 @@
 {
-  "name": "typescript-action",
-  "version": "0.0.0",
+  "name": "github-projects-column-mirror",
+  "version": "0.1.0",
   "private": true,
-  "description": "TypeScript template action",
+  "description": "Reflects all changes to a source project column in a target project column",
   "main": "lib/main.js",
   "scripts": {
     "build": "tsc",
@@ -11,21 +11,22 @@
     "lint": "eslint src/**/*.ts",
     "pack": "ncc build",
     "test": "jest",
-    "all": "npm run build && npm run format && npm run lint && npm run pack && npm test"
+    "all": "npm run build && npm run format && npm run lint && npm run pack"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/typescript-action.git"
+    "url": "git+https://github.com/jonabc/linked-project-columns.git"
   },
   "keywords": [
-    "actions",
-    "node",
-    "setup"
+    "GitHub",
+    "project",
+    "column"
   ],
-  "author": "YourNameOrOrganization",
+  "author": "Jon Ruskin",
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^1.2.0"
+    "@actions/core": "^1.2.0",
+    "@octokit/graphql": "^4.3.1"
   },
   "devDependencies": {
     "@types/jest": "^24.0.23",
