@@ -14,8 +14,6 @@ const github = graphql.defaults({
 })
 
 async function getAutomationNote(column: any): Promise<string> {
-  core.info(`source column: ${column.name}`)
-  core.info(`source project: ${column.project.name}`)
   return AUTOMATION_NOTE_TEMPLATE.replace('<column name>', column.name)
     .replace('<column url>', column.url.replace('/columns/', '#column-'))
     .replace('<project name>', column.project.name)
@@ -56,10 +54,8 @@ async function ensureCard(
     const cardData: any = {}
     if (card.content) {
       cardData.contentId = card.content.id
-      core.info(`setting content: ${card.content.id}`)
     } else {
       cardData.note = card.note
-      core.info(`setting note: ${cardData.note}`)
     }
 
     const response = await github(queries.ADD_PROJECT_CARD, {
@@ -76,14 +72,8 @@ async function ensureCard(
     targetColumn.cards.nodes.unshift(targetCard)
     targetCardIndex = 0
     core.info(`created card: ${targetCard.id}`)
-    core.info('cards now has:')
-    core.info(JSON.stringify(targetColumn.cards.nodes))
-    core.info(`new target card index = ${targetCardIndex}`)
-  } else {
-    core.info(`found card: ${targetCard.id}`)
   }
 
-  core.info(`card at index ${targetCardIndex}, wanted at ${index}`)
   if (targetCardIndex !== index) {
     // move!
     core.info(`moving card: ${targetCard.id}`)
@@ -104,7 +94,6 @@ async function ensureCard(
     targetCardIndex = index
 
     core.info(`moved card: ${targetCard.id} after ${moveData.afterCardId}`)
-    core.info(JSON.stringify(targetColumn.cards.nodes))
   }
 
   return targetCard
@@ -127,12 +116,6 @@ async function run(): Promise<void> {
     const sourceColumn = response['sourceColumn']
     const targetColumn = response['targetColumn']
 
-    core.info('sourceColumn')
-    core.info(JSON.stringify(sourceColumn))
-    core.info('targetColumn')
-    core.info(JSON.stringify(targetColumn))
-
-    core.info(`ensuring automation note card`)
     // make sure that a card explaining the automation on the column exists
     // at index 0 in the target column
     const automationNoteCard: any = {
@@ -140,7 +123,6 @@ async function run(): Promise<void> {
     }
     await ensureCard(automationNoteCard, 0, targetColumn)
 
-    core.info(`deleting extra cards from target column`)
     // delete all cards in target column that do not exist in the source column,
     // except for the automation note
     // start at index 1 to account for the automation note card
@@ -154,7 +136,6 @@ async function run(): Promise<void> {
       }
     }
 
-    core.info(`syncing cards from source column`)
     // make sure cards from the source column are in target column, in the right
     // order
     for (let index = 0; index < sourceColumn.cards.nodes.length; index++) {

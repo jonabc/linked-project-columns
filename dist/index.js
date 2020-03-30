@@ -2187,8 +2187,6 @@ const github = graphql_1.graphql.defaults({
 });
 function getAutomationNote(column) {
     return __awaiter(this, void 0, void 0, function* () {
-        core.info(`source column: ${column.name}`);
-        core.info(`source project: ${column.project.name}`);
         return AUTOMATION_NOTE_TEMPLATE.replace('<column name>', column.name)
             .replace('<column url>', column.url.replace('/columns/', '#column-'))
             .replace('<project name>', column.project.name)
@@ -2218,11 +2216,9 @@ function ensureCard(card, index, targetColumn) {
             const cardData = {};
             if (card.content) {
                 cardData.contentId = card.content.id;
-                core.info(`setting content: ${card.content.id}`);
             }
             else {
                 cardData.note = card.note;
-                core.info(`setting note: ${cardData.note}`);
             }
             const response = yield github(queries.ADD_PROJECT_CARD, Object.assign({ columnId: targetColumn.id }, cardData));
             if (!response) {
@@ -2233,14 +2229,7 @@ function ensureCard(card, index, targetColumn) {
             targetColumn.cards.nodes.unshift(targetCard);
             targetCardIndex = 0;
             core.info(`created card: ${targetCard.id}`);
-            core.info('cards now has:');
-            core.info(JSON.stringify(targetColumn.cards.nodes));
-            core.info(`new target card index = ${targetCardIndex}`);
         }
-        else {
-            core.info(`found card: ${targetCard.id}`);
-        }
-        core.info(`card at index ${targetCardIndex}, wanted at ${index}`);
         if (targetCardIndex !== index) {
             // move!
             core.info(`moving card: ${targetCard.id}`);
@@ -2254,7 +2243,6 @@ function ensureCard(card, index, targetColumn) {
             targetColumn.cards.nodes.splice(index, 0, targetColumn.cards.nodes.splice(targetCardIndex, 1)[0]);
             targetCardIndex = index;
             core.info(`moved card: ${targetCard.id} after ${moveData.afterCardId}`);
-            core.info(JSON.stringify(targetColumn.cards.nodes));
         }
         return targetCard;
     });
@@ -2274,18 +2262,12 @@ function run() {
             }
             const sourceColumn = response['sourceColumn'];
             const targetColumn = response['targetColumn'];
-            core.info('sourceColumn');
-            core.info(JSON.stringify(sourceColumn));
-            core.info('targetColumn');
-            core.info(JSON.stringify(targetColumn));
-            core.info(`ensuring automation note card`);
             // make sure that a card explaining the automation on the column exists
             // at index 0 in the target column
             const automationNoteCard = {
                 note: yield getAutomationNote(sourceColumn)
             };
             yield ensureCard(automationNoteCard, 0, targetColumn);
-            core.info(`deleting extra cards from target column`);
             // delete all cards in target column that do not exist in the source column,
             // except for the automation note
             // start at index 1 to account for the automation note card
@@ -2297,7 +2279,6 @@ function run() {
                     targetColumn.cards.nodes.splice(index, 1);
                 }
             }
-            core.info(`syncing cards from source column`);
             // make sure cards from the source column are in target column, in the right
             // order
             for (let index = 0; index < sourceColumn.cards.nodes.length; index++) {
