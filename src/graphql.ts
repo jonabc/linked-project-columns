@@ -1,12 +1,22 @@
+const projectCardContentFields = `
+id
+title
+labels(first: 20) {
+  nodes {
+    name
+  }
+}
+`.trim()
+
 const projectCardFields = `
 id
 note
 content {
   ... on Issue {
-    id
+    ${projectCardContentFields}
   }
   ... on PullRequest {
-    id
+    ${projectCardContentFields}
   }
 }
 `.trim()

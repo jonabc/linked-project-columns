@@ -2,16 +2,25 @@ name: 'GitHub Projects Column Mirror'
 description: 'Reflects all changes to a source project column in a target project column'
 author: 'Jon Ruskin'
 inputs:
-  sourceColumnId:
+  source_column_id:
     description: "Id of the source project column"
     required: true
-  targetColumnId:
+  target_column_id:
     description: "Id of the target project column"
     required: true
   github_token:
     description: "GitHub token to use for authenticated API calls"
     required: false
     default: ${{ github.token }}
+  type_filter:
+    description: "Filter to a single card type, either 'note' or 'content'"
+    required: false
+  label_filter:
+    description: "Filter to cards containing matching labels"
+    required: false
+  content_filter:
+    description: "Filter to cards with matching note content or issue/PR title"
+    required: false
 runs:
   using: 'node12'
   main: 'dist/index.js'

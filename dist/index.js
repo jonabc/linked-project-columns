@@ -1923,15 +1923,24 @@ module.exports = require("child_process");
 "use strict";
 
 Object.defineProperty(exports, "__esModule", { value: true });
+const projectCardContentFields = `
+id
+title
+labels(first: 20) {
+  nodes {
+    name
+  }
+}
+`.trim();
 const projectCardFields = `
 id
 note
 content {
   ... on Issue {
-    id
+    ${projectCardContentFields}
   }
   ... on PullRequest {
-    id
+    ${projectCardContentFields}
   }
 }
 `.trim();
@@ -2212,7 +2221,6 @@ function ensureCard(card, index, targetColumn) {
         }
         if (!targetCard) {
             // add!
-            core.info(`Creating card in ${targetColumn.name}`);
             const cardData = {};
             if (card.content) {
                 cardData.contentId = card.content.id;
@@ -2228,11 +2236,9 @@ function ensureCard(card, index, targetColumn) {
             targetCard = response['addProjectCard'].cardEdge.node;
             targetColumn.cards.nodes.unshift(targetCard);
             targetCardIndex = 0;
-            core.info(`created card: ${targetCard.id}`);
         }
         if (targetCardIndex !== index) {
             // move!
-            core.info(`moving card: ${targetCard.id}`);
             const moveData = {
                 cardId: targetCard.id,
                 columnId: targetColumn.id,
@@ -2242,16 +2248,66 @@ function ensureCard(card, index, targetColumn) {
             // update the target column card location in the local card array
             targetColumn.cards.nodes.splice(index, 0, targetColumn.cards.nodes.splice(targetCardIndex, 1)[0]);
             targetCardIndex = index;
-            core.info(`moved card: ${targetCard.id} after ${moveData.afterCardId}`);
         }
         return targetCard;
     });
 }
+// content filters are parsed from a string either as wrapped in quotes or comma separated
+const FILTER_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
+function getFilterList(input) {
+    if (!input) {
+        return [];
+    }
+    return [...input.matchAll(FILTER_LIST_REGEX)]
+        .map(match => match[3] || match[4])
+        .map(filter => filter.trim())
+        .filter(filter => !!filter);
+}
+function applyFilters(column) {
+    const typeFilter = core.getInput('type_filter', { required: false });
+    if (typeFilter === 'note') {
+        column.cards.nodes = column.cards.nodes.filter(card => !!card.note);
+    }
+    else if (typeFilter === 'content') {
+        column.cards.nodes = column.cards.nodes.filter(card => !!card.content);
+    }
+    else if (typeFilter) {
+        core.warning(`cannot apply unknown type_filter ${typeFilter}`);
+    }
+    const contentFilters = getFilterList(core.getInput('content_filter', { required: false }));
+    if (contentFilters.length > 0) {
+        // match content in case-insensitive manner
+        const contentMatchers = contentFilters.map(filter => new RegExp(filter, 'i'));
+        // filter to cards with displayed text content that matches at least one
+        // of the user-supplied filters
+        column.cards.nodes = column.cards.nodes.filter((card) => {
+            if (card.content) {
+                return contentMatchers.some(filter => filter.test(card.content.title));
+            }
+            else if (card.note) {
+                return contentMatchers.some(filter => filter.test(card.note));
+            }
+            // don't filter cards that cannot be filtered by content
+            return true;
+        });
+    }
+    const labelFilters = getFilterList(core.getInput('label_filter', { required: false }));
+    if (labelFilters.length > 0) {
+        column.cards.nodes = column.cards.nodes.filter((card) => {
+            if (card.content) {
+                // only include cards for issues and PRs that have a matching label
+                return card.content.labels.nodes.some(label => labelFilters.includes(label.name));
+            }
+            // don't filter cards that can't be filtered by labels
+            return true;
+        });
+    }
+}
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const sourceColumnId = core.getInput('sourceColumnId');
-            const targetColumnId = core.getInput('targetColumnId');
+            const sourceColumnId = core.getInput('source_column_id');
+            const targetColumnId = core.getInput('target_column_id');
             const response = yield github(queries.GET_PROJECT_COLUMNS, {
                 sourceColumnId,
                 targetColumnId,
@@ -2262,6 +2318,9 @@ function run() {
             }
             const sourceColumn = response['sourceColumn'];
             const targetColumn = response['targetColumn'];
+            // apply user supplied filters to cards from the source column and mirror the
+            // target column based on the remaining filters
+            applyFilters(sourceColumn);
             // make sure that a card explaining the automation on the column exists
             // at index 0 in the target column
             const automationNoteCard = {
@@ -2270,8 +2329,8 @@ function run() {
             yield ensureCard(automationNoteCard, 0, targetColumn);
             // delete all cards in target column that do not exist in the source column,
             // except for the automation note
-            // start at index 1 to account for the automation note card
-            for (let index = 1; index < targetColumn.cards.nodes.length; index++) {
+            // don't iterate over index 0, to account for the automation note card
+            for (let index = targetColumn.cards.nodes.length - 1; index >= 1; index--) {
                 const targetCard = targetColumn.cards.nodes[index];
                 const [sourceCard] = findCard(targetCard, sourceColumn);
                 if (!sourceCard) {
