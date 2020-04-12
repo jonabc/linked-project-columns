@@ -12,6 +12,15 @@ inputs:
     description: "GitHub token to use for authenticated API calls"
     required: false
     default: ${{ github.token }}
+  type_filter:
+    description: "Filter to a single card type, either 'note' or 'content'"
+    required: false
+  label_filter:
+    description: "Filter to cards containing matching labels"
+    required: false
+  content_filter:
+    description: "Filter to cards with matching note content or issue/PR title"
+    required: false
 runs:
   using: 'node12'
   main: 'dist/index.js'
