@@ -50,7 +50,6 @@ async function ensureCard(
 
   if (!targetCard) {
     // add!
-    core.info(`Creating card in ${targetColumn.name}`)
     const cardData: any = {}
     if (card.content) {
       cardData.contentId = card.content.id
@@ -71,12 +70,10 @@ async function ensureCard(
     targetCard = response['addProjectCard'].cardEdge.node
     targetColumn.cards.nodes.unshift(targetCard)
     targetCardIndex = 0
-    core.info(`created card: ${targetCard.id}`)
   }
 
   if (targetCardIndex !== index) {
     // move!
-    core.info(`moving card: ${targetCard.id}`)
     const moveData = {
       cardId: targetCard.id,
       columnId: targetColumn.id,
@@ -92,8 +89,6 @@ async function ensureCard(
       targetColumn.cards.nodes.splice(targetCardIndex, 1)[0]
     )
     targetCardIndex = index
-
-    core.info(`moved card: ${targetCard.id} after ${moveData.afterCardId}`)
   }
 
   return targetCard

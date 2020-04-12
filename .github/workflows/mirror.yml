@@ -1,7 +1,7 @@
 name: "mirror repo projects"
 on: # run this on a cron schedule
   schedule:
-    - cron: '*/3 * * * *'
+    - cron: '*/5 * * * *'
   push:
 
 jobs:
