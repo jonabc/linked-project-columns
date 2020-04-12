@@ -101,8 +101,8 @@ async function ensureCard(
 
 async function run(): Promise<void> {
   try {
-    const sourceColumnId = core.getInput('sourceColumnId')
-    const targetColumnId = core.getInput('targetColumnId')
+    const sourceColumnId = core.getInput('source_column_id')
+    const targetColumnId = core.getInput('target_column_id')
 
     const response = await github(queries.GET_PROJECT_COLUMNS, {
       sourceColumnId,

@@ -2250,8 +2250,8 @@ function ensureCard(card, index, targetColumn) {
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const sourceColumnId = core.getInput('sourceColumnId');
-            const targetColumnId = core.getInput('targetColumnId');
+            const sourceColumnId = core.getInput('source_column_id');
+            const targetColumnId = core.getInput('target_column_id');
             const response = yield github(queries.GET_PROJECT_COLUMNS, {
                 sourceColumnId,
                 targetColumnId,

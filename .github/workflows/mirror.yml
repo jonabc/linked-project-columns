@@ -11,6 +11,6 @@ jobs:
     - uses: actions/checkout@v2
     - uses: ./
       with:
-        sourceColumnId: MDEzOlByb2plY3RDb2x1bW44NTA2NzUz
-        targetColumnId: MDEzOlByb2plY3RDb2x1bW44NTA2NzYw
+        source_column_id: MDEzOlByb2plY3RDb2x1bW44NTA2NzUz
+        target_column_id: MDEzOlByb2plY3RDb2x1bW44NTA2NzYw
         github_token: ${{ secrets.TEST_SECRET }}
