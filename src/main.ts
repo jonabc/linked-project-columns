@@ -125,8 +125,8 @@ async function run(): Promise<void> {
 
     // delete all cards in target column that do not exist in the source column,
     // except for the automation note
-    // start at index 1 to account for the automation note card
-    for (let index = 1; index < targetColumn.cards.nodes.length; index++) {
+    // don't iterate over index 0, to account for the automation note card
+    for (let index = targetColumn.cards.nodes.length - 1; index >= 1; index--) {
       const targetCard = targetColumn.cards.nodes[index]
       const [sourceCard] = findCard(targetCard, sourceColumn)
 
