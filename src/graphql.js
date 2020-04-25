@@ -6,7 +6,7 @@ labels(first: 20) {
     name
   }
 }
-`.trim()
+`.trim();
 
 const projectCardFields = `
 id
@@ -19,7 +19,7 @@ content {
     ${projectCardContentFields}
   }
 }
-`.trim()
+`.trim();
 
 const projectColumnFields = `
 id
@@ -34,7 +34,7 @@ cards(first: $cardLimit) {
     ${projectCardFields}
   }
 }
-`.trim()
+`.trim();
 
 export const GET_PROJECT_COLUMNS = `
 query($sourceColumnId: ID!, $targetColumnId: ID!, $cardLimit: Int!) {
@@ -49,7 +49,7 @@ query($sourceColumnId: ID!, $targetColumnId: ID!, $cardLimit: Int!) {
     }
   }
 }
-`.trim()
+`.trim();
 
 export const ADD_PROJECT_CARD = `
 mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
@@ -61,7 +61,7 @@ mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
     }
   }
 }
-`.trim()
+`.trim();
 
 export const MOVE_PROJECT_CARD = `
 mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
@@ -73,7 +73,7 @@ mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
     }
   }
 }
-`.trim()
+`.trim();
 
 export const DELETE_PROJECT_CARD = `
 mutation deleteProjectCard($cardId: ID!) {
@@ -81,4 +81,4 @@ mutation deleteProjectCard($cardId: ID!) {
     deletedCardId
   }
 }
-`.trim()
+`.trim();
