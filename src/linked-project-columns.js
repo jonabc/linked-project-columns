@@ -1,5 +1,5 @@
 const core = require('@actions/core');
-const { graphql } = require('@octokit/graphql');
+const octokit = require('@octokit/graphql');
 const queries = require('./graphql');
 const filters = require('./filters');
 
@@ -15,19 +15,26 @@ function getAutomationNote(column) {
     .replace('<project url>', column.project.url);
 }
 
+// Find a card in an array of cards based on it's linked content, or it's note.
+// Returns an array of [found card, index of found card]
 function findCard(card, cards) {
-  let index;
+  let index = -1;
   if (card.content) {
     index = cards.findIndex(targetCard => targetCard.content && targetCard.content.id === card.content.id);
   } else {
     index = cards.findIndex(targetCard => targetCard.note && targetCard.note === card.note);
   }
 
+  if (index < 0) {
+    return [null, index];
+  }
+
   return [cards[index], index];
 }
 
+// Call the GitHub API to add a card to a project column
+// Returns an array of [added card, index card was added at]
 async function addCard(api, card, column) {
-  // add!
   const cardData = {};
   if (card.content) {
     cardData.contentId = card.content.id;
@@ -42,31 +49,35 @@ async function addCard(api, card, column) {
   return [response.addProjectCard.cardEdge.node, 0];
 }
 
-async function moveCard(api, card, columnId, afterCardId) {
+// Call the GitHub API to move a card in a project column
+// Returns the moved card.
+async function moveCard(api, card, column, afterCard) {
   const moveData = {
     cardId: card.id,
-    columnId,
-    afterCardId
+    columnId: column.id,
+    afterCardId: afterCard ? afterCard.id : null
   };
 
   const response = await api(queries.MOVE_PROJECT_CARD, moveData);
   return response.moveProjectCard.cardEdge.node;
 }
 
+// Apply an array of filters to an array of cards.
+// Returns an array of filtered cards.  Does not mutate the original cards array.
 function applyFilters(cards, filterFunctions) {
-  return filterFunctions.reduce((result, filter) => filter(result));
+  return filterFunctions.reduce((result, filter) => filter(result), cards);
 }
 
 async function run() {
   try {
-    const api = graphql.defaults({
+    const api = octokit.graphql.defaults({
       headers: {
-        authorization: `token ${core.getInput('github_token')}`
+        authorization: `token ${core.getInput('github_token', { required: true })}`
       }
     });
 
-    const sourceColumnId = core.getInput('source_column_id');
-    const targetColumnId = core.getInput('target_column_id');
+    const sourceColumnId = core.getInput('source_column_id', { required: true });
+    const targetColumnId = core.getInput('target_column_id', { required: true });
 
     const response = await api(queries.GET_PROJECT_COLUMNS, {
       sourceColumnId,
@@ -86,7 +97,7 @@ async function run() {
 
     // delete all cards in target column that do not exist in the source column,
     // except for the automation note
-    for (let index = targetCards - 1; index >= 0; index -= 1) {
+    for (let index = targetCards.length - 1; index >= 0; index -= 1) {
       const targetCard = targetCards[index];
       const [sourceCard] = findCard(targetCard, sourceCards);
 
@@ -104,6 +115,16 @@ async function run() {
       const sourceCard = sourceCards[sourceIndex];
       let [targetCard, targetIndex] = findCard(sourceCard, targetCards);
 
+      // since we are iterating through the list from 0 to length,
+      // we can assume that the targetCards array less than source index is
+      // in the proper order.
+      // this card needs to be found before further mutating the target cards
+      // array during this loop iteration
+      let afterCard = null;
+      if (sourceIndex > 0) {
+        afterCard = targetCards[sourceIndex - 1];
+      }
+
       // add the card if it doesn't yet exist
       if (!targetCard) {
         // this for loop cannot be parallelized, as it is dependent on ordering
@@ -116,16 +137,9 @@ async function run() {
 
       // move the card if it's not at the correct location
       if (targetIndex !== sourceIndex) {
-        // since we are iterating through the list from 0 to length,
-        // we can assume that
-        let afterCardId = null;
-        if (sourceIndex > 0) {
-          afterCardId = targetCards[sourceIndex - 1].id;
-        }
-
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
-        [targetCard] = await moveCard(api, targetCard, targetColumn.id, afterCardId);
+        targetCard = await moveCard(api, targetCard, targetColumn, afterCard);
 
         // remove the card from it's original index
         targetCards.splice(targetIndex, 1);

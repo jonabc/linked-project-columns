@@ -5,7 +5,7 @@
   "description": "Reflects all changes to a source project column in a target project column",
   "main": "dist/index.js",
   "scripts": {
-    "lint": "eslint 'src/**.js' --fix",
+    "lint": "eslint 'src/**.js' 'test/**.js' --fix",
     "test": "eslint 'src/**.js' 'test/**.js' && jest",
     "package": "ncc build src/main.js -o dist"
   },

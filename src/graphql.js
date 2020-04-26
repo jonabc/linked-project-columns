@@ -36,7 +36,7 @@ cards(first: $cardLimit) {
 }
 `.trim();
 
-export const GET_PROJECT_COLUMNS = `
+const GET_PROJECT_COLUMNS = `
 query($sourceColumnId: ID!, $targetColumnId: ID!, $cardLimit: Int!) {
   sourceColumn: node(id: $sourceColumnId) {
     ... on ProjectColumn {
@@ -51,7 +51,7 @@ query($sourceColumnId: ID!, $targetColumnId: ID!, $cardLimit: Int!) {
 }
 `.trim();
 
-export const ADD_PROJECT_CARD = `
+const ADD_PROJECT_CARD = `
 mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
   addProjectCard(input: { projectColumnId: $columnId, contentId: $contentId, note: $note }) {
     cardEdge {
@@ -63,7 +63,7 @@ mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
 }
 `.trim();
 
-export const MOVE_PROJECT_CARD = `
+const MOVE_PROJECT_CARD = `
 mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
   moveProjectCard(input: { cardId: $cardId, columnId: $columnId, afterCardId: $afterCardId }) {
     cardEdge {
@@ -75,10 +75,17 @@ mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
 }
 `.trim();
 
-export const DELETE_PROJECT_CARD = `
+const DELETE_PROJECT_CARD = `
 mutation deleteProjectCard($cardId: ID!) {
   deleteProjectCard(input: { cardId: $cardId }) {
     deletedCardId
   }
 }
 `.trim();
+
+module.exports = {
+  GET_PROJECT_COLUMNS,
+  ADD_PROJECT_CARD,
+  MOVE_PROJECT_CARD,
+  DELETE_PROJECT_CARD
+};
