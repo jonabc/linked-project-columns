@@ -69,8 +69,26 @@ function filterByLabel(cards) {
   });
 }
 
+function filterByState(cards) {
+  let stateFilter = core.getInput('state_filter', { required: false });
+  if (!stateFilter) {
+    return cards;
+  }
+
+  stateFilter = stateFilter.toUpperCase();
+  return cards.filter(card => {
+    if (card.content) {
+      // only include cards for issues and PRs in a matching state
+      return card.content.state === stateFilter;
+    }
+
+    // don't filter cards that can't be filtered by state
+    return true;
+  });
+}
 module.exports = {
   type: filterByType,
   content: filterByContent,
-  label: filterByLabel
+  label: filterByLabel,
+  state: filterByState,
 };

@@ -315,4 +315,47 @@ describe('linked-project-columns', () => {
     expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1002 }]);
     expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
   });
+
+  it('filters mirrored content cards based on state', async () => {
+    process.env.INPUT_STATE_FILTER = 'open';
+    getColumnsResponse.sourceColumn.cards.nodes.push(
+      {
+        id: 1,
+        content: {
+          id: 1001,
+          state: 'OPEN'
+        }
+      },
+      {
+        id: 2,
+        content: {
+          id: 1002,
+          state: 'CLOSED'
+        }
+      }
+    );
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(4);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1001 }]);
+    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+  });
+
+  it('does not filter mirrored note cards based on state', async () => {
+    process.env.INPUT_STATE_FILTER = 'open';
+    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: 'CLOSED' });
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(4);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: 'CLOSED' }]);
+    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+  });
 });
