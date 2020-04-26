@@ -1,0 +1,26 @@
+{
+  "sourceColumn": {
+    "id": 1,
+    "name": "source column",
+    "url": "https://example.com/projects/1/columns/1",
+    "project": {
+      "name": "source project",
+      "url": "https://example.com/projects/1"
+    },
+    "cards": {
+      "nodes": []
+    }
+  },
+  "targetColumn": {
+    "id": 2,
+    "name": "target column",
+    "url": "https://example.com/projects/2/columns/2",
+    "project": {
+      "name": "target project",
+      "url": "https://example.com/projects/2"
+    },
+    "cards": {
+      "nodes": []
+    }
+  }
+}
