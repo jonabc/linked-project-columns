@@ -42,11 +42,17 @@ async function addCard(api, card, column) {
     cardData.note = card.note;
   }
 
-  const response = await api(queries.ADD_PROJECT_CARD, {
-    columnId: column.id,
-    ...cardData
-  });
-  return [response.addProjectCard.cardEdge.node, 0];
+  try {
+    const response = await api(queries.ADD_PROJECT_CARD, {
+      columnId: column.id,
+      ...cardData
+    });
+    return [response.addProjectCard.cardEdge.node, 0];
+  } catch (error) {
+    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
+    core.warning(error.message);
+    return [null, -1];
+  }
 }
 
 // Call the GitHub API to move a card in a project column
@@ -121,7 +127,10 @@ async function run() {
       // this card needs to be found before further mutating the target cards
       // array during this loop iteration
       let afterCard = null;
-      if (sourceIndex > 0) {
+
+      if (sourceIndex > targetCards.length) {
+        afterCard = targetCards[targetCards.length - 1];
+      } else if (sourceIndex > 0) {
         afterCard = targetCards[sourceIndex - 1];
       }
 
@@ -132,11 +141,13 @@ async function run() {
         [targetCard, targetIndex] = await addCard(api, sourceCard, targetColumn);
 
         // add new card to local array and set index based on it's index in the column
-        targetCards.splice(targetIndex, 0, targetCard);
+        if (targetCard) {
+          targetCards.splice(targetIndex, 0, targetCard);
+        }
       }
 
       // move the card if it's not at the correct location
-      if (targetIndex !== sourceIndex) {
+      if (targetCard && targetIndex !== sourceIndex) {
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
         targetCard = await moveCard(api, targetCard, targetColumn, afterCard);
