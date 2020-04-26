@@ -50,7 +50,17 @@ The `${{ secrets.GITHUB_TOKEN }}` token can be used only when all project column
 2. `repo` to access information in private repositories
 3. `user` to access information in user repositories (if needed)
 
-### Filtering cards mirroring
+### Filtering mirrored cards
+
+##### Manual filtering
+
+`<!-- mirror ignore -->`
+
+Filters cards based on the existence of a mirror ignore comment in the card content.  The comment can be added to card notes, or to linked issue or PR bodies.
+
+When added to cards in the source project column, the cards will be ignored and not added to the target column.  When added to cards in the target project column, the cards will be ignored and will not be removed from the target column.
+
+##### Filtering on action inputs
 
 Cards can be filtered from mirroring by specifying additional inputs on the action workflow.
 
@@ -71,3 +81,9 @@ Label filters use exact, case sensitive comparisons to determine whether to mirr
 Filters mirrored cards based on the displayed card content.  Issue/PR titles is evaluated when they are linked as cards, otherwise the card's note text is used.
 
 Content filters use partial, case insensitive comparisons when determining which cards to mirror.  Content filter inputs can contain multiple filters separated by commas (`'first, second'`), and will be mirrored if any content matches are found (i.e. `OR` logic).  Content filters containing commas must be wrapped in quotes (`'first, second, "matching, with a comma"'`)
+
+**state_filter**
+
+Filters mirrored cards based on linked issue or PR state. Note cards do not have a state, and will never be filtered based on this input.  Must be one of:
+- `open`
+- `closed`
