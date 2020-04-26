@@ -165,7 +165,7 @@ describe('linked-project-columns', () => {
     expect(api.getCall(2).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
   });
 
-  it('filters mirrored cards to note type', async () => {
+  it('filters source cards to note type', async () => {
     process.env.INPUT_TYPE_FILTER = 'note';
     getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
 
@@ -179,7 +179,7 @@ describe('linked-project-columns', () => {
     expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
   });
 
-  it('filters mirrored cards to content type', async () => {
+  it('filters source cards to content type', async () => {
     process.env.INPUT_TYPE_FILTER = 'content';
     getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
 
@@ -193,7 +193,7 @@ describe('linked-project-columns', () => {
     expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
   });
 
-  it('filters mirrored content cards based on labels', async () => {
+  it('filters source content cards based on labels', async () => {
     process.env.INPUT_LABEL_FILTER = 'label 2';
     getColumnsResponse.sourceColumn.cards.nodes.push(
       {
@@ -235,7 +235,7 @@ describe('linked-project-columns', () => {
     expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
   });
 
-  it('does not filter mirrored note cards based on labels', async () => {
+  it('does not filter source note cards based on labels', async () => {
     process.env.INPUT_LABEL_FILTER = '1, 2, other';
     getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' });
 
@@ -249,7 +249,7 @@ describe('linked-project-columns', () => {
     expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
   });
 
-  it('filters mirrored note cards based on note content', async () => {
+  it('filters source note cards based on note content', async () => {
     process.env.INPUT_CONTENT_FILTER = '1, note 2, other';
     getColumnsResponse.sourceColumn.cards.nodes.push(
       {
@@ -278,7 +278,7 @@ describe('linked-project-columns', () => {
     expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
   });
 
-  it('filters mirrored content cards based on title content', async () => {
+  it('filters source content cards based on title content', async () => {
     process.env.INPUT_CONTENT_FILTER = '1, title 2, other';
     getColumnsResponse.sourceColumn.cards.nodes.push(
       {
@@ -314,5 +314,102 @@ describe('linked-project-columns', () => {
     expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
     expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1002 }]);
     expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
+  });
+
+  it('filters source content cards based on state', async () => {
+    process.env.INPUT_STATE_FILTER = 'open';
+    getColumnsResponse.sourceColumn.cards.nodes.push(
+      {
+        id: 1,
+        content: {
+          id: 1001,
+          state: 'OPEN'
+        }
+      },
+      {
+        id: 2,
+        content: {
+          id: 1002,
+          state: 'CLOSED'
+        }
+      }
+    );
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(4);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1001 }]);
+    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+  });
+
+  it('does not filter source note cards based on state', async () => {
+    process.env.INPUT_STATE_FILTER = 'open';
+    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: 'CLOSED' });
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(4);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: 'CLOSED' }]);
+    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+  });
+
+  it('filters source content cards with ignore comments', async () => {
+    getColumnsResponse.sourceColumn.cards.nodes.push({
+      id: 1,
+      content: { id: 1001, body: 'test\n<!-- mirror ignore -->\ntest' }
+    });
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(2);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    // no call to add the ignored item from the source column
+  });
+
+  it('filters source note cards with ignore comments', async () => {
+    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(2);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    // no call to add the ignored item from the source column
+  });
+
+  it('filters target content cards with ignore comments', async () => {
+    getColumnsResponse.targetColumn.cards.nodes.push({
+      id: 1,
+      content: { id: 1001, body: 'test\n<!-- mirror ignore -->\ntest' }
+    });
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(2);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    // no call to delete the item from the target column
+  });
+
+  it('filters target note cards with ignore comments', async () => {
+    getColumnsResponse.targetColumn.cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
+
+    await run();
+
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(2);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    // no call to delete the item from the target column
   });
 });

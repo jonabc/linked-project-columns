@@ -89,7 +89,7 @@ async function run() {
     // target column based on the remaining filters
     const { sourceColumn, targetColumn } = response;
     const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(filters)]);
-    const targetCards = targetColumn.cards.nodes;
+    const targetCards = applyFilters(targetColumn.cards.nodes, [filters.ignored]);
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.

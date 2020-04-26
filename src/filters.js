@@ -69,8 +69,46 @@ function filterByLabel(cards) {
   });
 }
 
+function filterByState(cards) {
+  let stateFilter = core.getInput('state_filter', { required: false });
+  if (!stateFilter) {
+    return cards;
+  }
+
+  stateFilter = stateFilter.toUpperCase();
+  return cards.filter(card => {
+    if (card.content) {
+      // only include cards for issues and PRs in a matching state
+      return card.content.state === stateFilter;
+    }
+
+    // don't filter cards that can't be filtered by state
+    return true;
+  });
+}
+
+const IGNORE_COMMENT = '<!-- mirror ignore -->';
+function filterIgnored(cards) {
+  return cards.filter(card => {
+    if (card.note) {
+      // don't include cards that have the ignore comment in the note
+      return !card.note.includes(IGNORE_COMMENT);
+    }
+
+    if (card.content && card.content.body) {
+      // don't include cards that have the ignore comment in content body
+      return !card.content.body.includes(IGNORE_COMMENT);
+    }
+
+    // do not filter cards that can't include ignored stamps
+    return true;
+  });
+}
+
 module.exports = {
   type: filterByType,
   content: filterByContent,
-  label: filterByLabel
+  label: filterByLabel,
+  state: filterByState,
+  ignored: filterIgnored
 };

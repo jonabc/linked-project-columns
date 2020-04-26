@@ -21,6 +21,9 @@ inputs:
   content_filter:
     description: "Filter to cards with matching note content or issue/PR title"
     required: false
+  state_filter:
+    description: "Filter to cards with matching issue or PR state, either 'open' or 'closed'"
+    required: false
 runs:
   using: 'node12'
   main: 'dist/index.js'
