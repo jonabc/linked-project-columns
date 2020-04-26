@@ -38,6 +38,7 @@ describe('linked-project-columns', () => {
     };
 
     sinon.spy(core, 'setFailed');
+    sinon.spy(core, 'warning');
 
     api = sinon.stub();
     sinon.stub(octokit.graphql, 'defaults').returns(api);
@@ -81,6 +82,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(1);
     expect(core.setFailed.getCall(0).args).toEqual(['Input required and not supplied: github_token']);
   });
@@ -90,6 +92,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(1);
     expect(core.setFailed.getCall(0).args).toEqual(['Input required and not supplied: source_column_id']);
   });
@@ -99,6 +102,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(1);
     expect(core.setFailed.getCall(0).args).toEqual(['Input required and not supplied: target_column_id']);
   });
@@ -106,21 +110,23 @@ describe('linked-project-columns', () => {
   it('queries for source and target column information', async () => {
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toBeGreaterThanOrEqual(1);
     expect(api.getCall(0).args).toContain(queries.GET_PROJECT_COLUMNS);
-    expect(core.setFailed.callCount).toEqual(0);
   });
 
   it('adds an automation note to the target column', async () => {
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(2);
     expect(api.getCall(1).args[0]).toEqual(queries.ADD_PROJECT_CARD);
     expect(api.getCall(1).args[1]).toMatchObject({
       columnId: 2,
       note: expect.stringMatching(/\*\*DO NOT EDIT\*\*/)
     });
-    expect(core.setFailed.callCount).toEqual(0);
   });
 
   it('deletes cards from the target column that are not in source', async () => {
@@ -128,6 +134,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // deletions happen before adds
@@ -142,6 +149,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(6);
     // call 0 -> get columns
@@ -152,12 +160,38 @@ describe('linked-project-columns', () => {
     expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
   });
 
+  it('logs a warning if a card cannot be added to the target', async () => {
+    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    api
+      .withArgs(queries.ADD_PROJECT_CARD)
+      .onCall(1)
+      .throws(new Error('test error'));
+
+    await run();
+
+    expect(core.warning.callCount).toEqual(2);
+    expect(core.warning.getCall(0).args).toEqual(
+      expect.arrayContaining([expect.stringContaining('Could not add card')])
+    );
+    expect(core.warning.getCall(1).args).toEqual(['test error']);
+    expect(core.setFailed.callCount).toEqual(0);
+
+    expect(api.callCount).toEqual(5);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    // the first card, with note '1' results in an error and won't have a secondary move call
+    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
+    expect(api.getCall(3).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
+    expect(api.getCall(4).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+  });
+
   it('moves cards on the target to match the source', async () => {
     getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
     getColumnsResponse.targetColumn.cards.nodes.push({ id: 202, note: '2' }, { id: 201, note: '1' });
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(3);
     // call 0 -> get columns
@@ -171,6 +205,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // call 0 -> get columns
@@ -185,6 +220,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // call 0 -> get columns
@@ -227,6 +263,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // call 0 -> get columns
@@ -241,6 +278,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // call 0 -> get columns
@@ -268,6 +306,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(6);
     // call 0 -> get columns
@@ -306,6 +345,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(6);
     // call 0 -> get columns
@@ -337,6 +377,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // call 0 -> get columns
@@ -351,6 +392,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(4);
     // call 0 -> get columns
@@ -367,6 +409,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(2);
     // call 0 -> get columns
@@ -379,6 +422,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(2);
     // call 0 -> get columns
@@ -394,6 +438,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(2);
     // call 0 -> get columns
@@ -406,6 +451,7 @@ describe('linked-project-columns', () => {
 
     await run();
 
+    expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
     expect(api.callCount).toEqual(2);
     // call 0 -> get columns

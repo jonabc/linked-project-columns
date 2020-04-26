@@ -1879,6 +1879,8 @@ module.exports = windowsRelease;
 const projectCardContentFields = `
 id
 title
+state
+body
 labels(first: 20) {
   nodes {
     name
@@ -5150,10 +5152,48 @@ function filterByLabel(cards) {
   });
 }
 
+function filterByState(cards) {
+  let stateFilter = core.getInput('state_filter', { required: false });
+  if (!stateFilter) {
+    return cards;
+  }
+
+  stateFilter = stateFilter.toUpperCase();
+  return cards.filter(card => {
+    if (card.content) {
+      // only include cards for issues and PRs in a matching state
+      return card.content.state === stateFilter;
+    }
+
+    // don't filter cards that can't be filtered by state
+    return true;
+  });
+}
+
+const IGNORE_COMMENT = '<!-- mirror ignore -->';
+function filterIgnored(cards) {
+  return cards.filter(card => {
+    if (card.note) {
+      // don't include cards that have the ignore comment in the note
+      return !card.note.includes(IGNORE_COMMENT);
+    }
+
+    if (card.content && card.content.body) {
+      // don't include cards that have the ignore comment in content body
+      return !card.content.body.includes(IGNORE_COMMENT);
+    }
+
+    // do not filter cards that can't include ignored stamps
+    return true;
+  });
+}
+
 module.exports = {
   type: filterByType,
   content: filterByContent,
-  label: filterByLabel
+  label: filterByLabel,
+  state: filterByState,
+  ignored: filterIgnored
 };
 
 
@@ -5924,11 +5964,17 @@ async function addCard(api, card, column) {
     cardData.note = card.note;
   }
 
-  const response = await api(queries.ADD_PROJECT_CARD, {
-    columnId: column.id,
-    ...cardData
-  });
-  return [response.addProjectCard.cardEdge.node, 0];
+  try {
+    const response = await api(queries.ADD_PROJECT_CARD, {
+      columnId: column.id,
+      ...cardData
+    });
+    return [response.addProjectCard.cardEdge.node, 0];
+  } catch (error) {
+    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
+    core.warning(error.message);
+    return [null, -1];
+  }
 }
 
 // Call the GitHub API to move a card in a project column
@@ -5971,7 +6017,7 @@ async function run() {
     // target column based on the remaining filters
     const { sourceColumn, targetColumn } = response;
     const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(filters)]);
-    const targetCards = targetColumn.cards.nodes;
+    const targetCards = applyFilters(targetColumn.cards.nodes, [filters.ignored]);
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.
@@ -6003,7 +6049,10 @@ async function run() {
       // this card needs to be found before further mutating the target cards
       // array during this loop iteration
       let afterCard = null;
-      if (sourceIndex > 0) {
+
+      if (sourceIndex > targetCards.length) {
+        afterCard = targetCards[targetCards.length - 1];
+      } else if (sourceIndex > 0) {
         afterCard = targetCards[sourceIndex - 1];
       }
 
@@ -6014,11 +6063,13 @@ async function run() {
         [targetCard, targetIndex] = await addCard(api, sourceCard, targetColumn);
 
         // add new card to local array and set index based on it's index in the column
-        targetCards.splice(targetIndex, 0, targetCard);
+        if (targetCard) {
+          targetCards.splice(targetIndex, 0, targetCard);
+        }
       }
 
       // move the card if it's not at the correct location
-      if (targetIndex !== sourceIndex) {
+      if (targetCard && targetIndex !== sourceIndex) {
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
         targetCard = await moveCard(api, targetCard, targetColumn, afterCard);
