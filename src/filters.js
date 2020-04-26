@@ -86,9 +86,29 @@ function filterByState(cards) {
     return true;
   });
 }
+
+const IGNORE_COMMENT = '<!-- mirror ignore -->';
+function filterIgnored(cards) {
+  return cards.filter(card => {
+    if (card.note) {
+      // don't include cards that have the ignore comment in the note
+      return !card.note.includes(IGNORE_COMMENT);
+    }
+
+    if (card.content && card.content.body) {
+      // don't include cards that have the ignore comment in content body
+      return !card.content.body.includes(IGNORE_COMMENT);
+    }
+
+    // do not filter cards that can't include ignored stamps
+    return true;
+  });
+}
+
 module.exports = {
   type: filterByType,
   content: filterByContent,
   label: filterByLabel,
   state: filterByState,
+  ignored: filterIgnored
 };

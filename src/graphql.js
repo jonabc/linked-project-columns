@@ -2,6 +2,7 @@ const projectCardContentFields = `
 id
 title
 state
+body
 labels(first: 20) {
   nodes {
     name
