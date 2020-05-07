@@ -24,19 +24,16 @@ The action is intended to be run on a cron schedule, see [mirror.yml](./.github/
 ```
 on:
   schedule:
-    cron:
-      # cron actions will not run more frequently than once every 5 minutes
-      - '*/5 * * * *'
+    - cron: '*/5 * * * *' # 5 minutes is the smallest frequency available to actions
 jobs:
   mirror_column:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: jonabc/linked-project-columns@<version>
+    - uses: jonabc/linked-project-columns@v1
       with:
         source_column_id: <column node id>
         target_column_id: <column node id>
-        github_token: ${{ secrets.MIRROR_SECRET_PAT }}
+        github_token: ${{ secrets.MIRROR_SECRET_PAT }} # can be secrets.GITHUB_TOKEN, see below
 ```
 
 ### Added notice card
