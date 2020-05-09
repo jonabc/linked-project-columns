@@ -38,7 +38,9 @@ jobs:
 
 ### Added notice card
 
-The action will add a notice to the top of the target project column, identifying the source project column and notifying users that the column is automatically managed.
+When the `add_note` action input is set to `'true'`, the action will add a notice to the top of the target project column, identifying the source project column and notifying users that the column is automatically managed.  Setting the `add_note` input to any other value will remove the note from the target column.
+
+To set a custom automation note, set `add_note: 'false'` and manually add a note to the target column that includes a [comment to ignore the card](#manual-filtering).
 
 ### Required permissions
 

@@ -24,6 +24,10 @@ inputs:
   state_filter:
     description: "Filter to cards with matching issue or PR state, either 'open' or 'closed'"
     required: false
+  add_note:
+    description: "Set to 'true' to automatically add an automation note to the target column"
+    required: false
+    default: 'true'
 runs:
   using: 'node12'
   main: 'dist/index.js'

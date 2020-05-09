@@ -34,7 +34,8 @@ describe('linked-project-columns', () => {
       ...process.env,
       INPUT_GITHUB_TOKEN: token,
       INPUT_SOURCE_COLUMN_ID: sourceColumnId,
-      INPUT_TARGET_COLUMN_ID: targetColumnId
+      INPUT_TARGET_COLUMN_ID: targetColumnId,
+      INPUT_ADD_NOTE: 'true'
     };
 
     sinon.spy(core, 'setFailed');
@@ -127,6 +128,17 @@ describe('linked-project-columns', () => {
       columnId: 2,
       note: expect.stringMatching(/\*\*DO NOT EDIT\*\*/)
     });
+  });
+
+  it('does not add an automation note to the target column if the input is not true', async () => {
+    process.env.INPUT_ADD_NOTE = 'false';
+
+    await run();
+
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
+    // no call to add an automation note
+    expect(api.callCount).toEqual(1);
   });
 
   it('deletes cards from the target column that are not in source', async () => {
