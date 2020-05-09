@@ -29,9 +29,8 @@ name
 url
 project {
   name
-  url
 }
-cards(first: $cardLimit) {
+cards(first: 50) {
   nodes {
     ${projectCardFields}
   }
@@ -39,8 +38,8 @@ cards(first: $cardLimit) {
 `.trim();
 
 const GET_PROJECT_COLUMNS = `
-query($sourceColumnId: ID!, $targetColumnId: ID!, $cardLimit: Int!) {
-  sourceColumn: node(id: $sourceColumnId) {
+query($sourceColumnIds: [ID!]!, $targetColumnId: ID!) {
+  sourceColumns: nodes(ids: $sourceColumnIds) {
     ... on ProjectColumn {
       ${projectColumnFields}
     }

@@ -3,16 +3,25 @@ const octokit = require('@octokit/graphql');
 const queries = require('./graphql');
 const utils = require('./utils');
 
-const AUTOMATION_NOTE_TEMPLATE = `
+const AUTOMATION_NOTE_HEADER = `
 **DO NOT EDIT**
-This column uses automation to mirror the ['<column name>' column](<column url>) from [<project name>](<project url>).
+This column is automatically populated from the following columns:
+`.trim();
+const AUTOMATION_NOTE_COLUMN_REFERENCE = `
+- [<project name>'s '<column name>' column](<column url>).
 `.trim();
 
-function getAutomationNote(column) {
-  return AUTOMATION_NOTE_TEMPLATE.replace('<column name>', column.name)
-    .replace('<column url>', column.url.replace('/columns/', '#column-'))
-    .replace('<project name>', column.project.name)
-    .replace('<project url>', column.project.url);
+function getAutomationNote(columns) {
+  const columnReferences = columns.map(column => {
+    return AUTOMATION_NOTE_COLUMN_REFERENCE.replace('<column name>', column.name)
+      .replace('<column url>', column.url.replace('/columns/', '#column-'))
+      .replace('<project name>', column.project.name);
+  });
+
+  return `
+${AUTOMATION_NOTE_HEADER}
+${columnReferences.join('\n')}
+`.trim();
 }
 
 // Find a card in an array of cards based on it's linked content, or it's note.
@@ -82,26 +91,27 @@ async function run() {
       }
     });
 
-    const sourceColumnId = core.getInput('source_column_id', { required: true });
+    const sourceColumnIds = utils.getInputList(core.getInput('source_column_id', { required: true }));
     const targetColumnId = core.getInput('target_column_id', { required: true });
 
     const response = await api(queries.GET_PROJECT_COLUMNS, {
-      sourceColumnId,
-      targetColumnId,
-      cardLimit: 100
+      sourceColumnIds,
+      targetColumnId
     });
 
     // apply user supplied filters to cards from the source column and mirror the
     // target column based on the remaining filters
-    const { sourceColumn, targetColumn } = response;
-    const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(utils.filters)]);
+    const { sourceColumns, targetColumn } = response;
+    const sourceCards = sourceColumns.flatMap(column => {
+      return applyFilters(column.cards.nodes, [...Object.values(utils.filters)]);
+    });
     const targetCards = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.
     const addNoteInput = core.getInput('add_note');
     if (addNoteInput.toLowerCase() === 'true') {
-      sourceCards.unshift({ note: getAutomationNote(sourceColumn) });
+      sourceCards.unshift({ note: getAutomationNote(sourceColumns) });
     }
 
     // delete all cards in target column that do not exist in the source column,

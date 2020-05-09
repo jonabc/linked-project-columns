@@ -4,11 +4,13 @@
 
 # GitHub Projects Column Mirror
 
-This is a GitHub Action to mirror columns in hierarchically modeled GitHub Projects.
+This GitHub Action mirrors columns between GitHub Projects boards.
 
-As an example, let's assume a scenario where there are issues used to document both epic and feature level scopes of work, where features belong to epics.
+## Use cases
 
-In this scenario, we have two project boards to individually track and give visibility into epics and features individually.  Each project board has the following columns:
+### Hierarchically modeled projects
+
+In this scenario there are issues used to document both epic and feature level scopes of work, where features belong to epics.  There are two project boards to individually track and give visibility into epics and features individually.  Each project board has the following columns:
 - backlog
 - active
 - done
@@ -17,9 +19,13 @@ If individual teams, or individual roles within a team, are only looking at the 
 
 This action makes this scenario easier by actively mirroring columns across project boards.  We can create an `active epics` column on the feature board that will automatically stay up to date with the `active` column on the epics project board.
 
+### Readonly views for projects
+
+In this scenario all cards, issues and PRs are managed on a primary project board. Users and teams create secondary boards for readonly views on specific content from the primary.
+
 ## Usage
 
-The action is intended to be run on a cron schedule, see [mirror.yml](./.github/workflows/mirror.yml) for an example.  The linked action workflow also uses the `push` event trigger for testing purposes only, and is not generally recommended for use.
+The action is intended to be run on a cron schedule, see [mirror.yml](./.github/workflows/mirror.yml) for an example.  The linked action workflow also uses the `push` event trigger for testing purposes only, which is for testing purposes only and not generally recommended for use.
 
 ```
 on:
@@ -35,6 +41,10 @@ jobs:
         target_column_id: <column node id>
         github_token: ${{ secrets.MIRROR_SECRET_PAT }} # can be secrets.GITHUB_TOKEN, see below
 ```
+
+### Multiple source columns
+
+The `source_column_id` input can contain multiple node column ids separated by commas (`'first, second'`).  Card ordering in the target column matches the ordering of the source column ids.  e.g. for `source_column_id: 'first, second'`, all cards from `first` will appear before cards from `second`.  
 
 ### Added notice card
 

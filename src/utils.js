@@ -106,6 +106,7 @@ function filterIgnored(cards) {
 }
 
 module.exports = {
+  getInputList,
   filters: {
     type: filterByType,
     content: filterByContent,
