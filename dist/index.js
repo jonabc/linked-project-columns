@@ -5078,19 +5078,19 @@ module.exports = resolveCommand;
 
 /***/ }),
 
-/***/ 503:
+/***/ 543:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
 const core = __webpack_require__(470);
 
 // content filters are parsed from a string either as wrapped in quotes or comma separated
-const FILTER_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
-function getFilterList(input) {
+const INPUT_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
+function getInputList(input) {
   if (!input) {
     return [];
   }
 
-  return [...input.matchAll(FILTER_LIST_REGEX)]
+  return [...input.matchAll(INPUT_LIST_REGEX)]
     .map(match => match[3] || match[4])
     .map(filter => filter.trim())
     .filter(filter => !!filter);
@@ -5112,7 +5112,7 @@ function filterByType(cards) {
 }
 
 function filterByContent(cards) {
-  let contentFilters = getFilterList(core.getInput('content_filter', { required: false }));
+  let contentFilters = getInputList(core.getInput('content_filter', { required: false }));
   if (contentFilters.length === 0) {
     return cards;
   }
@@ -5136,7 +5136,7 @@ function filterByContent(cards) {
 }
 
 function filterByLabel(cards) {
-  const labelFilters = getFilterList(core.getInput('label_filter', { required: false }));
+  const labelFilters = getInputList(core.getInput('label_filter', { required: false }));
   if (labelFilters.length === 0) {
     return cards;
   }
@@ -5189,11 +5189,13 @@ function filterIgnored(cards) {
 }
 
 module.exports = {
-  type: filterByType,
-  content: filterByContent,
-  label: filterByLabel,
-  state: filterByState,
-  ignored: filterIgnored
+  filters: {
+    type: filterByType,
+    content: filterByContent,
+    label: filterByLabel,
+    state: filterByState,
+    ignored: filterIgnored
+  }
 };
 
 
@@ -5923,7 +5925,7 @@ module.exports = function (x) {
 const core = __webpack_require__(470);
 const octokit = __webpack_require__(898);
 const queries = __webpack_require__(63);
-const filters = __webpack_require__(503);
+const utils = __webpack_require__(543);
 
 const AUTOMATION_NOTE_TEMPLATE = `
 **DO NOT EDIT**
@@ -6016,8 +6018,8 @@ async function run() {
     // apply user supplied filters to cards from the source column and mirror the
     // target column based on the remaining filters
     const { sourceColumn, targetColumn } = response;
-    const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(filters)]);
-    const targetCards = applyFilters(targetColumn.cards.nodes, [filters.ignored]);
+    const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(utils.filters)]);
+    const targetCards = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.

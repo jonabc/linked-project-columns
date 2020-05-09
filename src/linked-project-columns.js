@@ -1,7 +1,7 @@
 const core = require('@actions/core');
 const octokit = require('@octokit/graphql');
 const queries = require('./graphql');
-const filters = require('./filters');
+const utils = require('./utils');
 
 const AUTOMATION_NOTE_TEMPLATE = `
 **DO NOT EDIT**
@@ -94,8 +94,8 @@ async function run() {
     // apply user supplied filters to cards from the source column and mirror the
     // target column based on the remaining filters
     const { sourceColumn, targetColumn } = response;
-    const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(filters)]);
-    const targetCards = applyFilters(targetColumn.cards.nodes, [filters.ignored]);
+    const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(utils.filters)]);
+    const targetCards = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.

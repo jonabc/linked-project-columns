@@ -38,8 +38,8 @@ describe('linked-project-columns', () => {
       INPUT_ADD_NOTE: 'true'
     };
 
-    sinon.spy(core, 'setFailed');
-    sinon.spy(core, 'warning');
+    sinon.stub(core, 'setFailed');
+    sinon.stub(core, 'warning');
 
     api = sinon.stub();
     sinon.stub(octokit.graphql, 'defaults').returns(api);
