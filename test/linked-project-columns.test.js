@@ -38,8 +38,8 @@ describe('linked-project-columns', () => {
       INPUT_ADD_NOTE: 'true'
     };
 
-    sinon.spy(core, 'setFailed');
-    sinon.spy(core, 'warning');
+    sinon.stub(core, 'setFailed');
+    sinon.stub(core, 'warning');
 
     api = sinon.stub();
     sinon.stub(octokit.graphql, 'defaults').returns(api);
@@ -142,7 +142,8 @@ describe('linked-project-columns', () => {
   });
 
   it('deletes cards from the target column that are not in source', async () => {
-    getColumnsResponse.targetColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 3, note: '3' });
+    getColumnsResponse.targetColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' }, { id: 3, note: '3' });
 
     await run();
 
@@ -157,7 +158,7 @@ describe('linked-project-columns', () => {
   });
 
   it('adds cards from the source to the target', async () => {
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
 
     await run();
 
@@ -173,7 +174,7 @@ describe('linked-project-columns', () => {
   });
 
   it('logs a warning if a card cannot be added to the target', async () => {
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
     api
       .withArgs(queries.ADD_PROJECT_CARD)
       .onCall(1)
@@ -198,7 +199,7 @@ describe('linked-project-columns', () => {
   });
 
   it('moves cards on the target to match the source', async () => {
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
     getColumnsResponse.targetColumn.cards.nodes.push({ id: 202, note: '2' }, { id: 201, note: '1' });
 
     await run();
@@ -213,7 +214,7 @@ describe('linked-project-columns', () => {
 
   it('filters source cards to note type', async () => {
     process.env.INPUT_TYPE_FILTER = 'note';
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
 
     await run();
 
@@ -228,7 +229,7 @@ describe('linked-project-columns', () => {
 
   it('filters source cards to content type', async () => {
     process.env.INPUT_TYPE_FILTER = 'content';
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
 
     await run();
 
@@ -243,7 +244,7 @@ describe('linked-project-columns', () => {
 
   it('filters source content cards based on labels', async () => {
     process.env.INPUT_LABEL_FILTER = 'label 2';
-    getColumnsResponse.sourceColumn.cards.nodes.push(
+    getColumnsResponse.sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         content: {
@@ -286,7 +287,7 @@ describe('linked-project-columns', () => {
 
   it('does not filter source note cards based on labels', async () => {
     process.env.INPUT_LABEL_FILTER = '1, 2, other';
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: '1' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
 
     await run();
 
@@ -301,7 +302,7 @@ describe('linked-project-columns', () => {
 
   it('filters source note cards based on note content', async () => {
     process.env.INPUT_CONTENT_FILTER = '1, note 2, other';
-    getColumnsResponse.sourceColumn.cards.nodes.push(
+    getColumnsResponse.sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         note: 'note 1'
@@ -331,7 +332,7 @@ describe('linked-project-columns', () => {
 
   it('filters source content cards based on title content', async () => {
     process.env.INPUT_CONTENT_FILTER = '1, title 2, other';
-    getColumnsResponse.sourceColumn.cards.nodes.push(
+    getColumnsResponse.sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         content: {
@@ -370,7 +371,7 @@ describe('linked-project-columns', () => {
 
   it('filters source content cards based on state', async () => {
     process.env.INPUT_STATE_FILTER = 'open';
-    getColumnsResponse.sourceColumn.cards.nodes.push(
+    getColumnsResponse.sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         content: {
@@ -400,7 +401,7 @@ describe('linked-project-columns', () => {
 
   it('does not filter source note cards based on state', async () => {
     process.env.INPUT_STATE_FILTER = 'open';
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: 'CLOSED' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: 'CLOSED' });
 
     await run();
 
@@ -414,7 +415,7 @@ describe('linked-project-columns', () => {
   });
 
   it('filters source content cards with ignore comments', async () => {
-    getColumnsResponse.sourceColumn.cards.nodes.push({
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({
       id: 1,
       content: { id: 1001, body: 'test\n<!-- mirror ignore -->\ntest' }
     });
@@ -430,7 +431,7 @@ describe('linked-project-columns', () => {
   });
 
   it('filters source note cards with ignore comments', async () => {
-    getColumnsResponse.sourceColumn.cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
+    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
 
     await run();
 
@@ -469,5 +470,68 @@ describe('linked-project-columns', () => {
     // call 0 -> get columns
     // call 1 -> add automation note
     // no call to delete the item from the target column
+  });
+
+  describe('with multiple source columns', () => {
+    const secondSourceColumnId = 'second';
+
+    beforeEach(() => {
+      process.env.INPUT_SOURCE_COLUMN_ID = `${sourceColumnId},${secondSourceColumnId}`;
+      getColumnsResponse.sourceColumns.push({
+        id: 3,
+        name: 'second source column',
+        url: 'https://example.com/projects/1/columns/3',
+        project: {
+          name: 'source project'
+        },
+        cards: {
+          nodes: []
+        }
+      });
+    });
+
+    it('adds cards from all sources to the target', async () => {
+      getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+      getColumnsResponse.sourceColumns[1].cards.nodes.push({ id: 3, note: '3' }, { id: 4, note: '4' });
+
+      await run();
+
+      expect(core.warning.callCount).toEqual(0);
+      expect(core.setFailed.callCount).toEqual(0);
+      expect(api.callCount).toEqual(10);
+      expect(api.getCall(0).args).toEqual([
+        queries.GET_PROJECT_COLUMNS,
+        { sourceColumnIds: [sourceColumnId, secondSourceColumnId], targetColumnId }
+      ]);
+      // call 1 -> add automation note
+      expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
+      expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+      expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
+      expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
+      expect(api.getCall(6).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '3' }]);
+      expect(api.getCall(7).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 203, afterCardId: 202 }]);
+      expect(api.getCall(8).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '4' }]);
+      expect(api.getCall(9).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 204, afterCardId: 203 }]);
+    });
+
+    it('deletes cards from the target column that are not in any sources', async () => {
+      getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
+      getColumnsResponse.sourceColumns[1].cards.nodes.push({ id: 2, note: '2' });
+      getColumnsResponse.targetColumn.cards.nodes.push(
+        { id: 1, note: '1' },
+        { id: 2, note: '2' },
+        { id: 3, note: '3' }
+      );
+
+      await run();
+
+      expect(core.warning.callCount).toEqual(0);
+      expect(core.setFailed.callCount).toEqual(0);
+      expect(api.callCount).toEqual(3);
+      // deletions happen before adds
+      // call 0 -> get columns
+      expect(api.getCall(1).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 3 }]);
+      // call 2 -> add automation note
+    });
   });
 });

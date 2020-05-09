@@ -1,13 +1,13 @@
 const core = require('@actions/core');
 
 // content filters are parsed from a string either as wrapped in quotes or comma separated
-const FILTER_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
-function getFilterList(input) {
+const INPUT_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
+function getInputList(input) {
   if (!input) {
     return [];
   }
 
-  return [...input.matchAll(FILTER_LIST_REGEX)]
+  return [...input.matchAll(INPUT_LIST_REGEX)]
     .map(match => match[3] || match[4])
     .map(filter => filter.trim())
     .filter(filter => !!filter);
@@ -29,7 +29,7 @@ function filterByType(cards) {
 }
 
 function filterByContent(cards) {
-  let contentFilters = getFilterList(core.getInput('content_filter', { required: false }));
+  let contentFilters = getInputList(core.getInput('content_filter', { required: false }));
   if (contentFilters.length === 0) {
     return cards;
   }
@@ -53,7 +53,7 @@ function filterByContent(cards) {
 }
 
 function filterByLabel(cards) {
-  const labelFilters = getFilterList(core.getInput('label_filter', { required: false }));
+  const labelFilters = getInputList(core.getInput('label_filter', { required: false }));
   if (labelFilters.length === 0) {
     return cards;
   }
@@ -106,9 +106,12 @@ function filterIgnored(cards) {
 }
 
 module.exports = {
-  type: filterByType,
-  content: filterByContent,
-  label: filterByLabel,
-  state: filterByState,
-  ignored: filterIgnored
+  getInputList,
+  filters: {
+    type: filterByType,
+    content: filterByContent,
+    label: filterByLabel,
+    state: filterByState,
+    ignored: filterIgnored
+  }
 };

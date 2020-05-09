@@ -1907,9 +1907,8 @@ name
 url
 project {
   name
-  url
 }
-cards(first: $cardLimit) {
+cards(first: 50) {
   nodes {
     ${projectCardFields}
   }
@@ -1917,8 +1916,8 @@ cards(first: $cardLimit) {
 `.trim();
 
 const GET_PROJECT_COLUMNS = `
-query($sourceColumnId: ID!, $targetColumnId: ID!, $cardLimit: Int!) {
-  sourceColumn: node(id: $sourceColumnId) {
+query($sourceColumnIds: [ID!]!, $targetColumnId: ID!) {
+  sourceColumns: nodes(ids: $sourceColumnIds) {
     ... on ProjectColumn {
       ${projectColumnFields}
     }
@@ -5078,19 +5077,19 @@ module.exports = resolveCommand;
 
 /***/ }),
 
-/***/ 503:
+/***/ 543:
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
 const core = __webpack_require__(470);
 
 // content filters are parsed from a string either as wrapped in quotes or comma separated
-const FILTER_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
-function getFilterList(input) {
+const INPUT_LIST_REGEX = /\s*(?:((["'])([^\2]+?)\2)|([^"',]+))\s*/g;
+function getInputList(input) {
   if (!input) {
     return [];
   }
 
-  return [...input.matchAll(FILTER_LIST_REGEX)]
+  return [...input.matchAll(INPUT_LIST_REGEX)]
     .map(match => match[3] || match[4])
     .map(filter => filter.trim())
     .filter(filter => !!filter);
@@ -5112,7 +5111,7 @@ function filterByType(cards) {
 }
 
 function filterByContent(cards) {
-  let contentFilters = getFilterList(core.getInput('content_filter', { required: false }));
+  let contentFilters = getInputList(core.getInput('content_filter', { required: false }));
   if (contentFilters.length === 0) {
     return cards;
   }
@@ -5136,7 +5135,7 @@ function filterByContent(cards) {
 }
 
 function filterByLabel(cards) {
-  const labelFilters = getFilterList(core.getInput('label_filter', { required: false }));
+  const labelFilters = getInputList(core.getInput('label_filter', { required: false }));
   if (labelFilters.length === 0) {
     return cards;
   }
@@ -5189,11 +5188,14 @@ function filterIgnored(cards) {
 }
 
 module.exports = {
-  type: filterByType,
-  content: filterByContent,
-  label: filterByLabel,
-  state: filterByState,
-  ignored: filterIgnored
+  getInputList,
+  filters: {
+    type: filterByType,
+    content: filterByContent,
+    label: filterByLabel,
+    state: filterByState,
+    ignored: filterIgnored
+  }
 };
 
 
@@ -5923,18 +5925,27 @@ module.exports = function (x) {
 const core = __webpack_require__(470);
 const octokit = __webpack_require__(898);
 const queries = __webpack_require__(63);
-const filters = __webpack_require__(503);
+const utils = __webpack_require__(543);
 
-const AUTOMATION_NOTE_TEMPLATE = `
+const AUTOMATION_NOTE_HEADER = `
 **DO NOT EDIT**
-This column uses automation to mirror the ['<column name>' column](<column url>) from [<project name>](<project url>).
+This column is automatically populated from the following columns:
+`.trim();
+const AUTOMATION_NOTE_COLUMN_REFERENCE = `
+- [<project name>'s '<column name>' column](<column url>).
 `.trim();
 
-function getAutomationNote(column) {
-  return AUTOMATION_NOTE_TEMPLATE.replace('<column name>', column.name)
-    .replace('<column url>', column.url.replace('/columns/', '#column-'))
-    .replace('<project name>', column.project.name)
-    .replace('<project url>', column.project.url);
+function getAutomationNote(columns) {
+  const columnReferences = columns.map(column => {
+    return AUTOMATION_NOTE_COLUMN_REFERENCE.replace('<column name>', column.name)
+      .replace('<column url>', column.url.replace('/columns/', '#column-'))
+      .replace('<project name>', column.project.name);
+  });
+
+  return `
+${AUTOMATION_NOTE_HEADER}
+${columnReferences.join('\n')}
+`.trim();
 }
 
 // Find a card in an array of cards based on it's linked content, or it's note.
@@ -6004,26 +6015,27 @@ async function run() {
       }
     });
 
-    const sourceColumnId = core.getInput('source_column_id', { required: true });
+    const sourceColumnIds = utils.getInputList(core.getInput('source_column_id', { required: true }));
     const targetColumnId = core.getInput('target_column_id', { required: true });
 
     const response = await api(queries.GET_PROJECT_COLUMNS, {
-      sourceColumnId,
-      targetColumnId,
-      cardLimit: 100
+      sourceColumnIds,
+      targetColumnId
     });
 
     // apply user supplied filters to cards from the source column and mirror the
     // target column based on the remaining filters
-    const { sourceColumn, targetColumn } = response;
-    const sourceCards = applyFilters(sourceColumn.cards.nodes, [...Object.values(filters)]);
-    const targetCards = applyFilters(targetColumn.cards.nodes, [filters.ignored]);
+    const { sourceColumns, targetColumn } = response;
+    const sourceCards = sourceColumns.flatMap(column => {
+      return applyFilters(column.cards.nodes, [...Object.values(utils.filters)]);
+    });
+    const targetCards = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.
     const addNoteInput = core.getInput('add_note');
     if (addNoteInput.toLowerCase() === 'true') {
-      sourceCards.unshift({ note: getAutomationNote(sourceColumn) });
+      sourceCards.unshift({ note: getAutomationNote(sourceColumns) });
     }
 
     // delete all cards in target column that do not exist in the source column,
