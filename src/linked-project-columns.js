@@ -99,7 +99,10 @@ async function run() {
 
     // prepend the automation note card to the filtered source cards, so that
     // it will be created if needed in the target column.
-    sourceCards.unshift({ note: getAutomationNote(sourceColumn) });
+    const addNoteInput = core.getInput('add_note');
+    if (addNoteInput.toLowerCase() === 'true') {
+      sourceCards.unshift({ note: getAutomationNote(sourceColumn) });
+    }
 
     // delete all cards in target column that do not exist in the source column,
     // except for the automation note
