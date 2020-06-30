@@ -1908,7 +1908,7 @@ url
 project {
   name
 }
-cards(first: 50) {
+cards(first: 50, archivedStates: [NOT_ARCHIVED]) {
   nodes {
     ${projectCardFields}
   }
