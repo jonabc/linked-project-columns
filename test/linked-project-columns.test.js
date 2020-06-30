@@ -472,6 +472,17 @@ describe('linked-project-columns', () => {
     // no call to delete the item from the target column
   });
 
+  it('does not include archived cards', async () => {
+    await run();
+
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(2);
+    // call 0 -> get columns
+    // call 1 -> add automation note
+    expect(api.getCall(0).args[0]).toContain('archivedStates: [NOT_ARCHIVED]');
+  });
+
   describe('with multiple source columns', () => {
     const secondSourceColumnId = 'second';
 
