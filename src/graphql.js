@@ -23,16 +23,22 @@ content {
 }
 `.trim();
 
-const projectColumnFields = `
+// prettier-ignore
+const projectColumnFields = ({ after = false } = {}) => 
+`
 id
 name
 url
 project {
   name
 }
-cards(first: 50, archivedStates: [NOT_ARCHIVED]) {
+cards(first: 50, archivedStates: [NOT_ARCHIVED]${after ? 'after: $after' : ''}) {
   nodes {
     ${projectCardFields}
+  }
+  pageInfo {
+    hasNextPage
+    endCursor
   }
 }
 `.trim();
@@ -41,12 +47,22 @@ const GET_PROJECT_COLUMNS = `
 query($sourceColumnIds: [ID!]!, $targetColumnId: ID!) {
   sourceColumns: nodes(ids: $sourceColumnIds) {
     ... on ProjectColumn {
-      ${projectColumnFields}
+      ${projectColumnFields()}
     }
   }
   targetColumn: node(id: $targetColumnId) {
     ... on ProjectColumn {
-      ${projectColumnFields}
+      ${projectColumnFields()}
+    }
+  }
+}
+`.trim();
+
+const GET_SINGLE_PROJECT_COLUMN = `
+query($id: ID!, $after: String) {
+  column: node(id: $id) {
+    ... on ProjectColumn {
+      ${projectColumnFields({ after: true })}
     }
   }
 }
@@ -86,6 +102,7 @@ mutation deleteProjectCard($cardId: ID!) {
 
 module.exports = {
   GET_PROJECT_COLUMNS,
+  GET_SINGLE_PROJECT_COLUMN,
   ADD_PROJECT_CARD,
   MOVE_PROJECT_CARD,
   DELETE_PROJECT_CARD

@@ -8,7 +8,11 @@
         "name": "source project"
       },
       "cards": {
-        "nodes": []
+        "nodes": [],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
       }
     }
   ],
@@ -20,7 +24,11 @@
       "name": "target project"
     },
     "cards": {
-      "nodes": []
+      "nodes": [],
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      }
     }
   }
 }

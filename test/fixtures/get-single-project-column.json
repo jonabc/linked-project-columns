@@ -1,0 +1,17 @@
+{
+  "column": {
+    "id": 1,
+    "name": "source column",
+    "url": "https://example.com/projects/1/columns/1",
+    "project": {
+      "name": "source project"
+    },
+    "cards": {
+      "nodes": [],
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+      }
+    }
+  }
+}
