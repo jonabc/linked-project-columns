@@ -3,17 +3,12 @@ const octokit = require('@octokit/graphql');
 const queries = require('./graphql');
 const utils = require('./utils');
 
-const AUTOMATION_NOTE_HEADER = `
-**DO NOT EDIT**
-This column is automatically populated from the following columns:
-`.trim();
-const AUTOMATION_NOTE_COLUMN_REFERENCE = `
-- [<project name>'s '<column name>' column](<column url>).
-`.trim();
+const AUTOMATION_NOTE_HEADER = `**DO NOT EDIT**: Synced with [this column](<column url>)`
+
 
 function getAutomationNote(columns) {
   const columnReferences = columns.map(column => {
-    return AUTOMATION_NOTE_COLUMN_REFERENCE.replace('<column name>', column.name)
+    return AUTOMATION_NOTE_HEADER.replace('<column name>', column.name)
       .replace('<column url>', column.url.replace('/columns/', '#column-'))
       .replace('<project name>', column.project.name);
   });
