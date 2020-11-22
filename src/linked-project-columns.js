@@ -24,6 +24,29 @@ ${columnReferences.join('\n')}
 `.trim();
 }
 
+// Paginate project cards from all columns if/as needed
+async function paginateColumnCards(api, columns) {
+  for (let i = 0; i < columns.length; i += 1) {
+    const originalColumn = columns[i];
+
+    let currentColumn = originalColumn;
+    while (currentColumn.cards.pageInfo.hasNextPage) {
+      core.info(
+        `paginating ${currentColumn.project.name}:${currentColumn.name} after ${currentColumn.cards.pageInfo.endCursor}`
+      );
+
+      // eslint-disable-next-line no-await-in-loop
+      const { column } = await api(queries.GET_SINGLE_PROJECT_COLUMN, {
+        id: currentColumn.id,
+        after: currentColumn.cards.pageInfo.endCursor
+      });
+
+      originalColumn.cards.nodes.push(...column.cards.nodes);
+      currentColumn = column;
+    }
+  }
+}
+
 // Find a card in an array of cards based on it's linked content, or it's note.
 // Returns an array of [found card, index of found card]
 function findCard(card, cards) {
@@ -94,14 +117,16 @@ async function run() {
     const sourceColumnIds = utils.getInputList(core.getInput('source_column_id', { required: true }));
     const targetColumnId = core.getInput('target_column_id', { required: true });
 
-    const response = await api(queries.GET_PROJECT_COLUMNS, {
+    const { sourceColumns, targetColumn } = await api(queries.GET_PROJECT_COLUMNS, {
       sourceColumnIds,
       targetColumnId
     });
 
+    // paginate to gather all cards if needed
+    await paginateColumnCards(api, [...sourceColumns, targetColumn]);
+
     // apply user supplied filters to cards from the source column and mirror the
     // target column based on the remaining filters
-    const { sourceColumns, targetColumn } = response;
     const sourceCards = sourceColumns.flatMap(column => {
       return applyFilters(column.cards.nodes, [...Object.values(utils.filters)]);
     });
