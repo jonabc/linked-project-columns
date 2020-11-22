@@ -23,16 +23,14 @@ content {
 }
 `.trim();
 
-// prettier-ignore
-const projectColumnFields = ({ after = false } = {}) => 
-`
+const projectColumnFields = `
 id
 name
 url
 project {
   name
 }
-cards(first: 50, archivedStates: [NOT_ARCHIVED]${after ? 'after: $after' : ''}) {
+cards(first: 50, archivedStates: [NOT_ARCHIVED], after: $after) {
   nodes {
     ${projectCardFields}
   }
@@ -44,15 +42,15 @@ cards(first: 50, archivedStates: [NOT_ARCHIVED]${after ? 'after: $after' : ''}) 
 `.trim();
 
 const GET_PROJECT_COLUMNS = `
-query($sourceColumnIds: [ID!]!, $targetColumnId: ID!) {
+query($sourceColumnIds: [ID!]!, $targetColumnId: ID!, $after: String) {
   sourceColumns: nodes(ids: $sourceColumnIds) {
     ... on ProjectColumn {
-      ${projectColumnFields()}
+      ${projectColumnFields}
     }
   }
   targetColumn: node(id: $targetColumnId) {
     ... on ProjectColumn {
-      ${projectColumnFields()}
+      ${projectColumnFields}
     }
   }
 }
@@ -62,7 +60,7 @@ const GET_SINGLE_PROJECT_COLUMN = `
 query($id: ID!, $after: String) {
   column: node(id: $id) {
     ... on ProjectColumn {
-      ${projectColumnFields({ after: true })}
+      ${projectColumnFields}
     }
   }
 }
