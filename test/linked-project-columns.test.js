@@ -17,6 +17,9 @@ describe('linked-project-columns', () => {
   const getColumnsFixture = readFileSync(resolvePath(__dirname, './fixtures/get-project-columns.json'), {
     encoding: 'utf8'
   });
+  const getSingleColumnFixture = readFileSync(resolvePath(__dirname, './fixtures/get-single-project-column.json'), {
+    encoding: 'utf8'
+  });
   const deleteCardFixture = readFileSync(resolvePath(__dirname, './fixtures/delete-project-card.json'), {
     encoding: 'utf8'
   });
@@ -28,6 +31,7 @@ describe('linked-project-columns', () => {
   });
 
   let getColumnsResponse;
+  let getSingleColumnResponse;
 
   beforeEach(() => {
     process.env = {
@@ -45,8 +49,10 @@ describe('linked-project-columns', () => {
     sinon.stub(octokit.graphql, 'defaults').returns(api);
 
     getColumnsResponse = JSON.parse(getColumnsFixture);
+    getSingleColumnResponse = JSON.parse(getSingleColumnFixture);
 
     api.withArgs(queries.GET_PROJECT_COLUMNS).resolves(getColumnsResponse);
+    api.withArgs(queries.GET_SINGLE_PROJECT_COLUMN).resolves(getSingleColumnResponse);
     api.withArgs(queries.DELETE_PROJECT_CARD).callsFake((query, input) => {
       const response = JSON.parse(deleteCardFixture);
       response.deleteProjectCard.deletedCardId = input.cardId;
@@ -483,6 +489,54 @@ describe('linked-project-columns', () => {
     expect(api.getCall(0).args[0]).toContain('archivedStates: [NOT_ARCHIVED]');
   });
 
+  it('gathers additional pages of cards for source columns', async () => {
+    getColumnsResponse.sourceColumns[0].cards.pageInfo.hasNextPage = true;
+    getColumnsResponse.sourceColumns[0].cards.pageInfo.endCursor = 'abc';
+    getSingleColumnResponse.column.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+
+    await run();
+
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(7);
+    // call 0 -> get columns
+    expect(api.getCall(1).args).toEqual([
+      queries.GET_SINGLE_PROJECT_COLUMN,
+      {
+        id: getColumnsResponse.sourceColumns[0].id,
+        after: 'abc'
+      }
+    ]);
+    // call 2 -> add automation note
+    expect(api.getCall(3).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
+    expect(api.getCall(4).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+    expect(api.getCall(5).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
+    expect(api.getCall(6).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
+  });
+
+  it('gathers additional pages of cards for the target column', async () => {
+    getColumnsResponse.targetColumn.cards.pageInfo.hasNextPage = true;
+    getColumnsResponse.targetColumn.cards.pageInfo.endCursor = 'abc';
+    getSingleColumnResponse.column.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+
+    await run();
+
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.callCount).toEqual(5);
+    // call 0 -> get columns
+    expect(api.getCall(1).args).toEqual([
+      queries.GET_SINGLE_PROJECT_COLUMN,
+      {
+        id: getColumnsResponse.targetColumn.id,
+        after: 'abc'
+      }
+    ]);
+    expect(api.getCall(2).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 2 }]);
+    expect(api.getCall(3).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 1 }]);
+    // call 4 -> add automation note
+  });
+
   describe('with multiple source columns', () => {
     const secondSourceColumnId = 'second';
 
@@ -496,7 +550,11 @@ describe('linked-project-columns', () => {
           name: 'source project'
         },
         cards: {
-          nodes: []
+          nodes: [],
+          pageInfo: {
+            hasNextPage: false,
+            endCursor: null
+          }
         }
       });
     });
