@@ -1,56 +1,13 @@
 const core = require('@actions/core');
 const octokit = require('@octokit/graphql');
-const queries = require('./graphql');
+const api = require('./api');
 const utils = require('./utils');
-
-const AUTOMATION_NOTE_HEADER = `
-**DO NOT EDIT**
-This column is automatically populated from the following columns:
-`.trim();
-const AUTOMATION_NOTE_COLUMN_REFERENCE = `
-- [<project name>'s '<column name>' column](<column url>).
-`.trim();
-
-function getAutomationNote(columns) {
-  const columnReferences = columns.map(column => {
-    return AUTOMATION_NOTE_COLUMN_REFERENCE.replace('<column name>', column.name)
-      .replace('<column url>', column.url.replace('/columns/', '#column-'))
-      .replace('<project name>', column.project.name);
-  });
-
-  return `
-${AUTOMATION_NOTE_HEADER}
-${columnReferences.join('\n')}
-`.trim();
-}
-
-// Paginate project cards from all columns if/as needed
-async function paginateColumnCards(api, columns) {
-  for (let i = 0; i < columns.length; i += 1) {
-    const originalColumn = columns[i];
-
-    let currentColumn = originalColumn;
-    while (currentColumn.cards.pageInfo.hasNextPage) {
-      core.info(
-        `paginating ${currentColumn.project.name}:${currentColumn.name} after ${currentColumn.cards.pageInfo.endCursor}`
-      );
-
-      // eslint-disable-next-line no-await-in-loop
-      const { column } = await api(queries.GET_SINGLE_PROJECT_COLUMN, {
-        id: currentColumn.id,
-        after: currentColumn.cards.pageInfo.endCursor
-      });
-
-      originalColumn.cards.nodes.push(...column.cards.nodes);
-      currentColumn = column;
-    }
-  }
-}
 
 // Find a card in an array of cards based on it's linked content, or it's note.
 // Returns an array of [found card, index of found card]
-function findCard(card, cards) {
+function findCard(column, card) {
   let index = -1;
+  const cards = column.cards.nodes;
   if (card.content) {
     index = cards.findIndex(targetCard => targetCard.content && targetCard.content.id === card.content.id);
   } else {
@@ -64,40 +21,28 @@ function findCard(card, cards) {
   return [cards[index], index];
 }
 
-// Call the GitHub API to add a card to a project column
-// Returns an array of [added card, index card was added at]
-async function addCard(api, card, column) {
-  const cardData = {};
-  if (card.content) {
-    cardData.contentId = card.content.id;
-  } else {
-    cardData.note = card.note;
+async function ensureCardAtIndex(column, toIndex, findCardFunc, newCardFunc) {
+  let [card, currentIndex] = findCardFunc();
+  if (!card) {
+    // add card to remote project column cards
+    card = await api.addCardToColumn(column, newCardFunc());
+    currentIndex = 0;
+
+    // add the card to the local column cards
+    column.cards.nodes.splice(0, 0, card);
   }
 
-  try {
-    const response = await api(queries.ADD_PROJECT_CARD, {
-      columnId: column.id,
-      ...cardData
-    });
-    return [response.addProjectCard.cardEdge.node, 0];
-  } catch (error) {
-    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
-    core.warning(error.message);
-    return [null, -1];
+  if (card && currentIndex !== toIndex) {
+    // move card in remote project column cards
+    card = await api.moveCardToIndex(column, currentIndex, toIndex);
+
+    // remove the card from it's original index
+    column.cards.nodes.splice(currentIndex, 1);
+    // and add the card returned from moveCard at the destination index
+    column.cards.nodes.splice(toIndex, 0, card);
   }
-}
 
-// Call the GitHub API to move a card in a project column
-// Returns the moved card.
-async function moveCard(api, card, column, afterCard) {
-  const moveData = {
-    cardId: card.id,
-    columnId: column.id,
-    afterCardId: afterCard ? afterCard.id : null
-  };
-
-  const response = await api(queries.MOVE_PROJECT_CARD, moveData);
-  return response.moveProjectCard.cardEdge.node;
+  return card;
 }
 
 // Apply an array of filters to an array of cards.
@@ -108,93 +53,93 @@ function applyFilters(cards, filterFunctions) {
 
 async function run() {
   try {
-    const api = octokit.graphql.defaults({
-      headers: {
-        authorization: `token ${core.getInput('github_token', { required: true })}`
-      }
-    });
-
     const sourceColumnIds = utils.getInputList(core.getInput('source_column_id', { required: true }));
     const targetColumnId = core.getInput('target_column_id', { required: true });
+    const addSourceColumnNotes = core.getInput('source_column_notices').toLowerCase() === 'true';
+    const addAutomationNote = core.getInput('automation_notice').toLowerCase() === 'true';
 
-    const { sourceColumns, targetColumn } = await api(queries.GET_PROJECT_COLUMNS, {
-      sourceColumnIds,
-      targetColumnId
-    });
+    api.setAPI(
+      octokit.graphql.defaults({
+        headers: {
+          authorization: `token ${core.getInput('github_token', { required: true })}`
+        }
+      })
+    );
 
-    // paginate to gather all cards if needed
-    await paginateColumnCards(api, [...sourceColumns, targetColumn]);
+    const { sourceColumns, targetColumn } = await api.getProjectColumns(sourceColumnIds, targetColumnId);
 
-    // apply user supplied filters to cards from the source column and mirror the
-    // target column based on the remaining filters
-    const sourceCards = sourceColumns.flatMap(column => {
-      return applyFilters(column.cards.nodes, [...Object.values(utils.filters)]);
-    });
-    const targetCards = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
-
-    // prepend the automation note card to the filtered source cards, so that
-    // it will be created if needed in the target column.
-    const addNoteInput = core.getInput('add_note');
-    if (addNoteInput.toLowerCase() === 'true') {
-      sourceCards.unshift({ note: getAutomationNote(sourceColumns) });
+    // filter ignored cards from the target column
+    targetColumn.cards.nodes = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
+    // apply all filters to source columns
+    // eslint-disable-next-line no-restricted-syntax
+    for (const sourceColumn of sourceColumns) {
+      sourceColumn.cards.nodes = applyFilters(sourceColumn.cards.nodes, [...Object.values(utils.filters)]);
     }
 
-    // delete all cards in target column that do not exist in the source column,
-    // except for the automation note
-    for (let index = targetCards.length - 1; index >= 0; index -= 1) {
-      const targetCard = targetCards[index];
-      const [sourceCard] = findCard(targetCard, sourceCards);
+    let targetIndex = 0;
 
-      if (!sourceCard) {
-        // this loop is dependent on ordering and cannot be parallelized
-        // eslint-disable-next-line no-await-in-loop
-        await api(queries.DELETE_PROJECT_CARD, { cardId: targetCard.id });
-        targetCards.splice(index, 1);
+    // ensure the automation note is in the correct position if enabled
+    if (addAutomationNote) {
+      const card = await ensureCardAtIndex(
+        targetColumn,
+        targetIndex,
+        () => utils.findAutomationNote(targetColumn),
+        () => ({ note: utils.newAutomationNote(sourceColumns) })
+      );
+
+      if (card) {
+        targetIndex += 1;
       }
     }
 
-    // make sure cards from the source column are in target column,
-    // in the correct order
-    for (let sourceIndex = 0; sourceIndex < sourceCards.length; sourceIndex += 1) {
-      const sourceCard = sourceCards[sourceIndex];
-      let [targetCard, targetIndex] = findCard(sourceCard, targetCards);
-
-      // since we are iterating through the list from 0 to length,
-      // we can assume that the targetCards array less than source index is
-      // in the proper order.
-      // this card needs to be found before further mutating the target cards
-      // array during this loop iteration
-      let afterCard = null;
-
-      if (sourceIndex > targetCards.length) {
-        afterCard = targetCards[targetCards.length - 1];
-      } else if (sourceIndex > 0) {
-        afterCard = targetCards[sourceIndex - 1];
-      }
-
-      // add the card if it doesn't yet exist
-      if (!targetCard) {
+    // make sure the target column matches the contents from all source columns
+    // eslint-disable-next-line no-restricted-syntax
+    for (const sourceColumn of sourceColumns) {
+      // ensure that source column notes are in the correct position if enabled
+      if (addSourceColumnNotes) {
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
-        [targetCard, targetIndex] = await addCard(api, sourceCard, targetColumn);
+        const card = await ensureCardAtIndex(
+          targetColumn,
+          targetIndex,
+          () => utils.findColumnHeaderNote(targetColumn, sourceColumn),
+          () => ({ note: utils.newColumnHeaderNote(sourceColumn) })
+        );
 
-        // add new card to local array and set index based on it's index in the column
-        if (targetCard) {
-          targetCards.splice(targetIndex, 0, targetCard);
+        if (card) {
+          targetIndex += 1;
         }
       }
 
-      // move the card if it's not at the correct location
-      if (targetCard && targetIndex !== sourceIndex) {
+      // sync the contents from the source column to the correct position in the
+      // target column
+      // eslint-disable-next-line no-restricted-syntax
+      for (const sourceCard of sourceColumn.cards.nodes) {
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
-        targetCard = await moveCard(api, targetCard, targetColumn, afterCard);
+        const card = await ensureCardAtIndex(
+          targetColumn,
+          targetIndex,
+          () => findCard(targetColumn, sourceCard),
+          () => sourceCard
+        );
 
-        // remove the card from it's original index
-        targetCards.splice(targetIndex, 1);
-        // and add the card returned from moveCard at the destination index
-        targetCards.splice(sourceIndex, 0, targetCard);
+        if (card) {
+          targetIndex += 1;
+        }
       }
+    }
+
+    // delete remaining cards
+    while (targetColumn.cards.nodes.length > targetIndex) {
+      const deleteIndex = targetColumn.cards.nodes.length - 1;
+      // remove the card from the remote column
+      // this for loop cannot be parallelized, as it is dependent on ordering
+      // eslint-disable-next-line no-await-in-loop
+      await api.deleteCardAtIndex(targetColumn, deleteIndex);
+
+      // remove the card from the local column
+      targetColumn.cards.nodes.splice(deleteIndex, 1);
     }
   } catch (error) {
     core.setFailed(error.message);
