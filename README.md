@@ -46,11 +46,21 @@ jobs:
 
 The `source_column_id` input can contain multiple node column ids separated by commas (`'first, second'`).  Card ordering in the target column matches the ordering of the source column ids.  e.g. for `source_column_id: 'first, second'`, all cards from `first` will appear before cards from `second`.  
 
-### Added notice card
+### Added automation notice card
 
-When the `add_note` action input is set to `'true'`, the action will add a notice to the top of the target project column, identifying the source project column and notifying users that the column is automatically managed.  Setting the `add_note` input to any other value will remove the note from the target column.
+When the `automation_notice` action input is set to the string `'true'`, the action will add a notice to the top of the target project column to notify users that the column is automatically managed.  Setting the `automation_notice` input to any other value will remove the note from the target column.
 
-To set a custom automation note, set `add_note: 'false'` and manually add a note to the target column that includes a [comment to ignore the card](#manual-filtering).
+#### Customizing the automation notice
+
+The action identifies the automation notice by a comment in the card note: `<!-- automation-notice -->`.  The notice card can be customized as desired and will not be affected so long as the comment is kept in place.
+
+### Added column notice cards
+
+When the `source_column_notices` action input is set to the string `'true'`, the action will add a notice to the target project column before the cards synchronized from each source column.  Setting the `source_column_notices` input to any other value will remove the note from the target column.
+
+#### Customizing the column notices
+
+The action identifies a column notice by a comment in the card note: `<!-- column-notice: <id> -->`.  The notice card can be customized as desired and will not be affected so long as the comment is kept in place.
 
 ### Required permissions
 

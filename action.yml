@@ -24,8 +24,12 @@ inputs:
   state_filter:
     description: "Filter to cards with matching issue or PR state, either 'open' or 'closed'"
     required: false
-  add_note:
-    description: "Set to 'true' to automatically add an automation note to the target column"
+  automation_notice:
+    description: "Set to 'true' to automatically add an automation notice to the target column"
+    required: false
+    default: 'true'
+  source_column_notices:
+    description: "Set to 'true' to automatically add a \"header\" notice for each source to the target column"
     required: false
     default: 'true'
 runs:
