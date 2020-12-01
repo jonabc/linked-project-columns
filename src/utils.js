@@ -105,7 +105,36 @@ function filterIgnored(cards) {
   });
 }
 
+const AUTOMATION_NOTE_COMMENT = '<!-- automation-notice -->';
+const newAutomationNote = () =>
+  `${AUTOMATION_NOTE_COMMENT}
+**DO NOT EDIT** This column is automatically managed.
+`.trim();
+
+function findAutomationNote(column) {
+  const cards = column.cards.nodes;
+  const index = cards.findIndex(c => c.note && c.note.includes(AUTOMATION_NOTE_COMMENT));
+  return [cards[index], index];
+}
+
+const getColumnHeaderComment = column => `<!-- column-notice: ${column.id} -->`;
+const newColumnHeaderNote = column =>
+  `${getColumnHeaderComment(column)}
+The following cards are from the [${column.project.name}'s '${column.name}' column](${column.url}).
+`.trim();
+
+function findColumnHeaderNote(column, linkedColumn) {
+  const columnHeaderComment = getColumnHeaderComment(linkedColumn);
+  const cards = column.cards.nodes;
+  const index = cards.findIndex(c => c.note && c.note.includes(columnHeaderComment));
+  return [cards[index], index];
+}
+
 module.exports = {
+  newAutomationNote,
+  findAutomationNote,
+  newColumnHeaderNote,
+  findColumnHeaderNote,
   getInputList,
   filters: {
     type: filterByType,

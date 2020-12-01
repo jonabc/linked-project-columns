@@ -1,11 +1,10 @@
 const core = require('@actions/core');
-const octokit = require('@octokit/graphql');
 const sinon = require('sinon');
 const { readFileSync } = require('fs');
 const { resolve: resolvePath } = require('path');
 
 const run = require('../src/linked-project-columns');
-const queries = require('../src/graphql');
+const api = require('../src/api');
 
 describe('linked-project-columns', () => {
   const processEnv = process.env;
@@ -13,11 +12,7 @@ describe('linked-project-columns', () => {
   const sourceColumnId = 'source';
   const targetColumnId = 'target';
 
-  let api;
   const getColumnsFixture = readFileSync(resolvePath(__dirname, './fixtures/get-project-columns.json'), {
-    encoding: 'utf8'
-  });
-  const getSingleColumnFixture = readFileSync(resolvePath(__dirname, './fixtures/get-single-project-column.json'), {
     encoding: 'utf8'
   });
   const deleteCardFixture = readFileSync(resolvePath(__dirname, './fixtures/delete-project-card.json'), {
@@ -31,51 +26,58 @@ describe('linked-project-columns', () => {
   });
 
   let getColumnsResponse;
-  let getSingleColumnResponse;
+  let sourceColumns;
+  let targetColumn;
 
   beforeEach(() => {
     process.env = {
       ...process.env,
       INPUT_GITHUB_TOKEN: token,
       INPUT_SOURCE_COLUMN_ID: sourceColumnId,
-      INPUT_TARGET_COLUMN_ID: targetColumnId,
-      INPUT_ADD_NOTE: 'true'
+      INPUT_TARGET_COLUMN_ID: targetColumnId
     };
 
     sinon.stub(core, 'setFailed');
     sinon.stub(core, 'warning');
 
-    api = sinon.stub();
-    sinon.stub(octokit.graphql, 'defaults').returns(api);
-
     getColumnsResponse = JSON.parse(getColumnsFixture);
-    getSingleColumnResponse = JSON.parse(getSingleColumnFixture);
+    sourceColumns = getColumnsResponse.sourceColumns;
+    targetColumn = getColumnsResponse.targetColumn;
 
-    api.withArgs(queries.GET_PROJECT_COLUMNS).resolves(getColumnsResponse);
-    api.withArgs(queries.GET_SINGLE_PROJECT_COLUMN).resolves(getSingleColumnResponse);
-    api.withArgs(queries.DELETE_PROJECT_CARD).callsFake((query, input) => {
+    sinon.stub(api, 'setAPI');
+    sinon.stub(api, 'getProjectColumns').returns(getColumnsResponse);
+    sinon.stub(api, 'deleteCardAtIndex').callsFake((column, index) => {
       const response = JSON.parse(deleteCardFixture);
-      response.deleteProjectCard.deletedCardId = input.cardId;
-      return Promise.resolve(response);
+      response.deleteProjectCard.deletedCardId = column.cards.nodes[index].id;
+      return Promise.resolve(response.deleteProjectCard.deletedCardId);
     });
-    api.withArgs(queries.MOVE_PROJECT_CARD).callsFake((query, input) => {
+    sinon.stub(api, 'moveCardToIndex').callsFake((column, fromIndex) => {
       const response = JSON.parse(moveCardFixture);
-      response.moveProjectCard.cardEdge.node.id = input.cardId;
-      return Promise.resolve(response);
+      const card = column.cards.nodes[fromIndex];
+      response.moveProjectCard.cardEdge.node.id = card.id;
+      if (card.note) {
+        response.moveProjectCard.cardEdge.node.note = card.note;
+      }
+      if (card.content) {
+        response.moveProjectCard.cardEdge.node.content = card.content;
+      }
+
+      return Promise.resolve(response.moveProjectCard.cardEdge.node);
     });
+
     let newId = 200;
-    api.withArgs(queries.ADD_PROJECT_CARD).callsFake((query, input) => {
+    sinon.stub(api, 'addCardToColumn').callsFake((column, card) => {
       const response = JSON.parse(addCardFixture);
       response.addProjectCard.cardEdge.node.id = newId;
       newId += 1;
-      if (input.note) {
-        response.addProjectCard.cardEdge.node.note = input.note;
+      if (card.note) {
+        response.addProjectCard.cardEdge.node.note = card.note;
       }
-      if (input.contentId) {
-        response.addProjectCard.cardEdge.node.content = { id: input.contentId };
+      if (card.content) {
+        response.addProjectCard.cardEdge.node.content = card.content;
       }
 
-      return Promise.resolve(response);
+      return Promise.resolve(response.addProjectCard.cardEdge.node);
     });
   });
 
@@ -119,138 +121,162 @@ describe('linked-project-columns', () => {
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toBeGreaterThanOrEqual(1);
-    expect(api.getCall(0).args).toContain(queries.GET_PROJECT_COLUMNS);
+    expect(api.getProjectColumns.callCount).toEqual(1);
+    expect(api.getProjectColumns.getCall(0).args).toEqual([
+      [process.env.INPUT_SOURCE_COLUMN_ID],
+      process.env.INPUT_TARGET_COLUMN_ID
+    ]);
   });
 
-  it('adds an automation note to the target column', async () => {
+  it('adds an automation notice to the target column when enabled', async () => {
+    process.env.INPUT_AUTOMATION_NOTICE = 'true';
     await run();
+
+    expect(targetColumn.cards.nodes[0]).toMatchObject({
+      note: expect.stringMatching(/<!-- automation-notice -->/)
+    });
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(2);
-    expect(api.getCall(1).args[0]).toEqual(queries.ADD_PROJECT_CARD);
-    expect(api.getCall(1).args[1]).toMatchObject({
-      columnId: 2,
-      note: expect.stringMatching(/\*\*DO NOT EDIT\*\*/)
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args[1]).toMatchObject({
+      note: expect.stringMatching(/<!-- automation-notice -->/)
     });
   });
 
-  it('does not add an automation note to the target column if the input is not true', async () => {
-    process.env.INPUT_ADD_NOTE = 'false';
-
+  it('adds source column notices to the target column when enabled', async () => {
+    process.env.INPUT_SOURCE_COLUMN_NOTICES = 'true';
     await run();
+
+    expect(targetColumn.cards.nodes[0]).toMatchObject({
+      note: expect.stringMatching(`<!-- column-notice: ${sourceColumns[0].id} -->`)
+    });
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    // no call to add an automation note
-    expect(api.callCount).toEqual(1);
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args[1]).toMatchObject({
+      note: expect.stringMatching(`<!-- column-notice: ${sourceColumns[0].id} -->`)
+    });
+  });
+
+  it('does not add notices to the target column when disabled', async () => {
+    await run();
+    expect(targetColumn.cards.nodes.length).toEqual(0);
+
+    expect(core.warning.callCount).toEqual(0);
+    expect(core.setFailed.callCount).toEqual(0);
+    expect(api.addCardToColumn.callCount).toEqual(0);
   });
 
   it('deletes cards from the target column that are not in source', async () => {
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 3, note: '3' });
-    getColumnsResponse.targetColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' }, { id: 3, note: '3' });
+    sourceColumns[0].cards.nodes.push({ id: 3, note: '3' });
+    targetColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' }, { id: 3, note: '3' });
 
     await run();
 
+    expect(targetColumn.cards.nodes).toEqual([{ id: 3, note: '3' }]);
+
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // deletions happen before adds
-    // call 0 -> get columns
-    expect(api.getCall(1).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 2 }]);
-    expect(api.getCall(2).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 1 }]);
-    // call 3 -> add automation note
+
+    expect(api.deleteCardAtIndex.callCount).toEqual(2);
+    expect(api.deleteCardAtIndex.getCall(0).args).toEqual([targetColumn, 2]);
+    expect(api.deleteCardAtIndex.getCall(1).args).toEqual([targetColumn, 1]);
   });
 
   it('adds cards from the source to the target', async () => {
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([
+      { id: 200, note: '1' },
+      { id: 201, note: '2' }
+    ]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(6);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
-    expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
-    expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
-  });
 
-  it('logs a warning if a card cannot be added to the target', async () => {
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
-    api
-      .withArgs(queries.ADD_PROJECT_CARD)
-      .onCall(1)
-      .throws(new Error('test error'));
+    expect(api.addCardToColumn.callCount).toEqual(2);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: '1' }]);
+    expect(api.addCardToColumn.getCall(1).args).toEqual([targetColumn, { id: 2, note: '2' }]);
 
-    await run();
-
-    expect(core.warning.callCount).toEqual(2);
-    expect(core.warning.getCall(0).args).toEqual(
-      expect.arrayContaining([expect.stringContaining('Could not add card')])
-    );
-    expect(core.warning.getCall(1).args).toEqual(['test error']);
-    expect(core.setFailed.callCount).toEqual(0);
-
-    expect(api.callCount).toEqual(5);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    // the first card, with note '1' results in an error and won't have a secondary move call
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
-    expect(api.getCall(3).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
-    expect(api.getCall(4).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+    // cards are by default added at index 0, and the second added card needs
+    // to be moved to the end of the column
+    expect(api.moveCardToIndex.callCount).toEqual(1);
+    expect(api.moveCardToIndex.getCall(0).args).toEqual([targetColumn, 0, 1]);
   });
 
   it('moves cards on the target to match the source', async () => {
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
-    getColumnsResponse.targetColumn.cards.nodes.push({ id: 202, note: '2' }, { id: 201, note: '1' });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    targetColumn.cards.nodes.push({ id: 202, note: '2' }, { id: 201, note: '1' });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([
+      { id: 201, note: '1' },
+      { id: 202, note: '2' }
+    ]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(3);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+
+    expect(api.moveCardToIndex.callCount).toEqual(1);
+    expect(api.moveCardToIndex.getCall(0).args).toEqual([targetColumn, 1, 0]);
+  });
+
+  it('adds, moves and deletes cards to sync columns', async () => {
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+    targetColumn.cards.nodes.push({ id: 201, note: '3' }, { id: 203, note: '4' }, { id: 202, note: '2' });
+
+    await run();
+
+    expect(targetColumn.cards.nodes).toEqual([
+      { id: 200, note: '1' },
+      { id: 202, note: '2' }
+    ]);
   });
 
   it('filters source cards to note type', async () => {
     process.env.INPUT_TYPE_FILTER = 'note';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([{ id: 200, note: '1' }]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: '1' }]);
   });
 
   it('filters source cards to content type', async () => {
     process.env.INPUT_TYPE_FILTER = 'content';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, content: { id: 1000 } });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([{ id: 200, content: { id: 1000 } }]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1000 }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 2, content: { id: 1000 } }]);
   });
 
   it('filters source content cards based on labels', async () => {
     process.env.INPUT_LABEL_FILTER = 'label 2';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push(
+    const matchingCard = {
+      id: 2,
+      content: {
+        id: 1002,
+        labels: {
+          nodes: [{ name: 'label 2' }]
+        }
+      }
+    };
+
+    sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         content: {
@@ -260,15 +286,7 @@ describe('linked-project-columns', () => {
           }
         }
       },
-      {
-        id: 2,
-        content: {
-          id: 1002,
-          labels: {
-            nodes: [{ name: 'label 2' }]
-          }
-        }
-      },
+      { ...matchingCard },
       {
         id: 3,
         content: {
@@ -281,34 +299,30 @@ describe('linked-project-columns', () => {
     );
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([{ ...matchingCard, id: 200 }]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1002 }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, matchingCard]);
   });
 
   it('does not filter source note cards based on labels', async () => {
     process.env.INPUT_LABEL_FILTER = '1, 2, other';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([{ id: 200, note: '1' }]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: '1' }]);
   });
 
   it('filters source note cards based on note content', async () => {
     process.env.INPUT_CONTENT_FILTER = '1, note 2, other';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push(
+    sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         note: 'note 1'
@@ -324,21 +338,21 @@ describe('linked-project-columns', () => {
     );
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([
+      { id: 200, note: 'note 1' },
+      { id: 201, note: 'note 2' }
+    ]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(6);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: 'note 1' }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
-    expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: 'note 2' }]);
-    expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
+    expect(api.addCardToColumn.callCount).toEqual(2);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: 'note 1' }]);
+    expect(api.addCardToColumn.getCall(1).args).toEqual([targetColumn, { id: 2, note: 'note 2' }]);
   });
 
   it('filters source content cards based on title content', async () => {
     process.env.INPUT_CONTENT_FILTER = '1, title 2, other';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push(
+    sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         content: {
@@ -363,21 +377,28 @@ describe('linked-project-columns', () => {
     );
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([
+      { id: 200, content: { id: 1001, title: 'title 1' } },
+      { id: 201, content: { id: 1002, title: 'title 2' } }
+    ]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(6);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1001 }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
-    expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1002 }]);
-    expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
+
+    expect(api.addCardToColumn.callCount).toEqual(2);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([
+      targetColumn,
+      { id: 1, content: { id: 1001, title: 'title 1' } }
+    ]);
+    expect(api.addCardToColumn.getCall(1).args).toEqual([
+      targetColumn,
+      { id: 2, content: { id: 1002, title: 'title 2' } }
+    ]);
   });
 
   it('filters source content cards based on state', async () => {
     process.env.INPUT_STATE_FILTER = 'open';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push(
+    sourceColumns[0].cards.nodes.push(
       {
         id: 1,
         content: {
@@ -395,146 +416,82 @@ describe('linked-project-columns', () => {
     );
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([{ id: 200, content: { id: 1001, state: 'OPEN' } }]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, contentId: 1001 }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([
+      targetColumn,
+      { id: 1, content: { id: 1001, state: 'OPEN' } }
+    ]);
   });
 
   it('does not filter source note cards based on state', async () => {
     process.env.INPUT_STATE_FILTER = 'open';
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: 'CLOSED' });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: 'CLOSED' });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([{ id: 200, note: 'CLOSED' }]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(4);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: 'CLOSED' }]);
-    expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
+
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: 'CLOSED' }]);
   });
 
   it('filters source content cards with ignore comments', async () => {
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({
+    sourceColumns[0].cards.nodes.push({
       id: 1,
       content: { id: 1001, body: 'test\n<!-- mirror ignore -->\ntest' }
     });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(2);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    // no call to add the ignored item from the source column
+    expect(api.addCardToColumn.callCount).toEqual(0);
   });
 
   it('filters source note cards with ignore comments', async () => {
-    getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
+    sourceColumns[0].cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(2);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    // no call to add the ignored item from the source column
+    expect(api.addCardToColumn.callCount).toEqual(0);
   });
 
   it('filters target content cards with ignore comments', async () => {
-    getColumnsResponse.targetColumn.cards.nodes.push({
+    targetColumn.cards.nodes.push({
       id: 1,
       content: { id: 1001, body: 'test\n<!-- mirror ignore -->\ntest' }
     });
 
     await run();
+    // we expect to filter out cards locally, but not to delete them from
+    // the remote
+    expect(targetColumn.cards.nodes).toEqual([]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(2);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    // no call to delete the item from the target column
+    expect(api.deleteCardAtIndex.callCount).toEqual(0);
   });
 
   it('filters target note cards with ignore comments', async () => {
-    getColumnsResponse.targetColumn.cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
+    targetColumn.cards.nodes.push({ id: 1, note: 'test\n<!-- mirror ignore -->\ntest' });
 
     await run();
+    expect(targetColumn.cards.nodes).toEqual([]);
 
     expect(core.warning.callCount).toEqual(0);
     expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(2);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    // no call to delete the item from the target column
-  });
-
-  it('does not include archived cards', async () => {
-    await run();
-
-    expect(core.warning.callCount).toEqual(0);
-    expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(2);
-    // call 0 -> get columns
-    // call 1 -> add automation note
-    expect(api.getCall(0).args[0]).toContain('archivedStates: [NOT_ARCHIVED]');
-  });
-
-  it('gathers additional pages of cards for source columns', async () => {
-    getColumnsResponse.sourceColumns[0].cards.pageInfo.hasNextPage = true;
-    getColumnsResponse.sourceColumns[0].cards.pageInfo.endCursor = 'abc';
-    getSingleColumnResponse.column.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
-
-    await run();
-
-    expect(core.warning.callCount).toEqual(0);
-    expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(7);
-    // call 0 -> get columns
-    expect(api.getCall(1).args).toEqual([
-      queries.GET_SINGLE_PROJECT_COLUMN,
-      {
-        id: getColumnsResponse.sourceColumns[0].id,
-        after: 'abc'
-      }
-    ]);
-    // call 2 -> add automation note
-    expect(api.getCall(3).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
-    expect(api.getCall(4).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
-    expect(api.getCall(5).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
-    expect(api.getCall(6).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
-  });
-
-  it('gathers additional pages of cards for the target column', async () => {
-    getColumnsResponse.targetColumn.cards.pageInfo.hasNextPage = true;
-    getColumnsResponse.targetColumn.cards.pageInfo.endCursor = 'abc';
-    getSingleColumnResponse.column.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
-
-    await run();
-
-    expect(core.warning.callCount).toEqual(0);
-    expect(core.setFailed.callCount).toEqual(0);
-    expect(api.callCount).toEqual(5);
-    // call 0 -> get columns
-    expect(api.getCall(1).args).toEqual([
-      queries.GET_SINGLE_PROJECT_COLUMN,
-      {
-        id: getColumnsResponse.targetColumn.id,
-        after: 'abc'
-      }
-    ]);
-    expect(api.getCall(2).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 2 }]);
-    expect(api.getCall(3).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 1 }]);
-    // call 4 -> add automation note
+    expect(api.deleteCardAtIndex.callCount).toEqual(0);
   });
 
   describe('with multiple source columns', () => {
@@ -542,7 +499,7 @@ describe('linked-project-columns', () => {
 
     beforeEach(() => {
       process.env.INPUT_SOURCE_COLUMN_ID = `${sourceColumnId},${secondSourceColumnId}`;
-      getColumnsResponse.sourceColumns.push({
+      sourceColumns.push({
         id: 3,
         name: 'second source column',
         url: 'https://example.com/projects/1/columns/3',
@@ -560,47 +517,63 @@ describe('linked-project-columns', () => {
     });
 
     it('adds cards from all sources to the target', async () => {
-      getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
-      getColumnsResponse.sourceColumns[1].cards.nodes.push({ id: 3, note: '3' }, { id: 4, note: '4' });
+      sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
+      sourceColumns[1].cards.nodes.push({ id: 3, note: '3' }, { id: 4, note: '4' });
 
       await run();
+      expect(targetColumn.cards.nodes).toEqual([
+        { id: 200, note: '1' },
+        { id: 201, note: '2' },
+        { id: 202, note: '3' },
+        { id: 203, note: '4' }
+      ]);
 
       expect(core.warning.callCount).toEqual(0);
       expect(core.setFailed.callCount).toEqual(0);
-      expect(api.callCount).toEqual(10);
-      expect(api.getCall(0).args).toEqual([
-        queries.GET_PROJECT_COLUMNS,
-        { sourceColumnIds: [sourceColumnId, secondSourceColumnId], targetColumnId }
-      ]);
-      // call 1 -> add automation note
-      expect(api.getCall(2).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '1' }]);
-      expect(api.getCall(3).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 201, afterCardId: 200 }]);
-      expect(api.getCall(4).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '2' }]);
-      expect(api.getCall(5).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 202, afterCardId: 201 }]);
-      expect(api.getCall(6).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '3' }]);
-      expect(api.getCall(7).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 203, afterCardId: 202 }]);
-      expect(api.getCall(8).args).toEqual([queries.ADD_PROJECT_CARD, { columnId: 2, note: '4' }]);
-      expect(api.getCall(9).args).toEqual([queries.MOVE_PROJECT_CARD, { columnId: 2, cardId: 204, afterCardId: 203 }]);
+
+      expect(api.getProjectColumns.callCount).toEqual(1);
+      expect(api.getProjectColumns.getCall(0).args).toEqual([[sourceColumnId, secondSourceColumnId], targetColumnId]);
+
+      expect(api.addCardToColumn.callCount).toEqual(4);
+      expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: '1' }]);
+      expect(api.addCardToColumn.getCall(1).args).toEqual([targetColumn, { id: 2, note: '2' }]);
+      expect(api.addCardToColumn.getCall(2).args).toEqual([targetColumn, { id: 3, note: '3' }]);
+      expect(api.addCardToColumn.getCall(3).args).toEqual([targetColumn, { id: 4, note: '4' }]);
     });
 
     it('deletes cards from the target column that are not in any sources', async () => {
-      getColumnsResponse.sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
-      getColumnsResponse.sourceColumns[1].cards.nodes.push({ id: 2, note: '2' });
-      getColumnsResponse.targetColumn.cards.nodes.push(
-        { id: 1, note: '1' },
-        { id: 2, note: '2' },
-        { id: 3, note: '3' }
-      );
+      sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
+      sourceColumns[1].cards.nodes.push({ id: 2, note: '2' });
+      targetColumn.cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' }, { id: 3, note: '3' });
 
       await run();
+      expect(targetColumn.cards.nodes).toEqual([
+        { id: 1, note: '1' },
+        { id: 2, note: '2' }
+      ]);
 
       expect(core.warning.callCount).toEqual(0);
       expect(core.setFailed.callCount).toEqual(0);
-      expect(api.callCount).toEqual(3);
-      // deletions happen before adds
-      // call 0 -> get columns
-      expect(api.getCall(1).args).toEqual([queries.DELETE_PROJECT_CARD, { cardId: 3 }]);
-      // call 2 -> add automation note
+
+      expect(api.deleteCardAtIndex.callCount).toEqual(1);
+      expect(api.deleteCardAtIndex.getCall(0).args).toEqual([targetColumn, 2]);
+    });
+
+    it('adds column headers for all columns when enabled', async () => {
+      process.env.INPUT_SOURCE_COLUMN_NOTICES = 'true';
+      sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
+      sourceColumns[1].cards.nodes.push({ id: 3, note: '2' });
+
+      await run();
+      expect(targetColumn.cards.nodes).toMatchObject([
+        { id: 200, note: expect.stringMatching(`<!-- column-notice: ${sourceColumns[0].id} -->`) },
+        { id: 201, note: '1' },
+        { id: 202, note: expect.stringMatching(`<!-- column-notice: ${sourceColumns[1].id} -->`) },
+        { id: 203, note: '2' }
+      ]);
+
+      expect(core.warning.callCount).toEqual(0);
+      expect(core.setFailed.callCount).toEqual(0);
     });
   });
 });

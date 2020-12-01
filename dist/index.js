@@ -1873,117 +1873,29 @@ module.exports = windowsRelease;
 
 /***/ }),
 
-/***/ 63:
-/***/ (function(module) {
+/***/ 82:
+/***/ (function(__unusedmodule, exports) {
 
-const projectCardContentFields = `
-id
-title
-state
-body
-labels(first: 20) {
-  nodes {
-    name
-  }
-}
-`.trim();
+"use strict";
 
-const projectCardFields = `
-id
-note
-content {
-  ... on Issue {
-    ${projectCardContentFields}
-  }
-  ... on PullRequest {
-    ${projectCardContentFields}
-  }
-}
-`.trim();
-
-const projectColumnFields = `
-id
-name
-url
-project {
-  name
-}
-cards(first: 50, archivedStates: [NOT_ARCHIVED], after: $after) {
-  nodes {
-    ${projectCardFields}
-  }
-  pageInfo {
-    hasNextPage
-    endCursor
-  }
-}
-`.trim();
-
-const GET_PROJECT_COLUMNS = `
-query($sourceColumnIds: [ID!]!, $targetColumnId: ID!, $after: String) {
-  sourceColumns: nodes(ids: $sourceColumnIds) {
-    ... on ProjectColumn {
-      ${projectColumnFields}
+// We use any as a valid input type
+/* eslint-disable @typescript-eslint/no-explicit-any */
+Object.defineProperty(exports, "__esModule", { value: true });
+/**
+ * Sanitizes an input into a string so it can be passed into issueCommand safely
+ * @param input input to sanitize into a string
+ */
+function toCommandValue(input) {
+    if (input === null || input === undefined) {
+        return '';
     }
-  }
-  targetColumn: node(id: $targetColumnId) {
-    ... on ProjectColumn {
-      ${projectColumnFields}
+    else if (typeof input === 'string' || input instanceof String) {
+        return input;
     }
-  }
+    return JSON.stringify(input);
 }
-`.trim();
-
-const GET_SINGLE_PROJECT_COLUMN = `
-query($id: ID!, $after: String) {
-  column: node(id: $id) {
-    ... on ProjectColumn {
-      ${projectColumnFields}
-    }
-  }
-}
-`.trim();
-
-const ADD_PROJECT_CARD = `
-mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
-  addProjectCard(input: { projectColumnId: $columnId, contentId: $contentId, note: $note }) {
-    cardEdge {
-      node {
-        ${projectCardFields}
-      }
-    }
-  }
-}
-`.trim();
-
-const MOVE_PROJECT_CARD = `
-mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
-  moveProjectCard(input: { cardId: $cardId, columnId: $columnId, afterCardId: $afterCardId }) {
-    cardEdge {
-      node {
-        ${projectCardFields}
-      }
-    }
-  }
-}
-`.trim();
-
-const DELETE_PROJECT_CARD = `
-mutation deleteProjectCard($cardId: ID!) {
-  deleteProjectCard(input: { cardId: $cardId }) {
-    deletedCardId
-  }
-}
-`.trim();
-
-module.exports = {
-  GET_PROJECT_COLUMNS,
-  GET_SINGLE_PROJECT_COLUMN,
-  ADD_PROJECT_CARD,
-  MOVE_PROJECT_CARD,
-  DELETE_PROJECT_CARD
-};
-
+exports.toCommandValue = toCommandValue;
+//# sourceMappingURL=utils.js.map
 
 /***/ }),
 
@@ -1991,6 +1903,42 @@ module.exports = {
 /***/ (function(module) {
 
 module.exports = require("os");
+
+/***/ }),
+
+/***/ 102:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+// For internal use, subject to change.
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+// We use any as a valid input type
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const fs = __importStar(__webpack_require__(747));
+const os = __importStar(__webpack_require__(87));
+const utils_1 = __webpack_require__(82);
+function issueCommand(command, message) {
+    const filePath = process.env[`GITHUB_${command}`];
+    if (!filePath) {
+        throw new Error(`Unable to find environment variable for file command ${command}`);
+    }
+    if (!fs.existsSync(filePath)) {
+        throw new Error(`Missing file at path: ${filePath}`);
+    }
+    fs.appendFileSync(filePath, `${utils_1.toCommandValue(message)}${os.EOL}`, {
+        encoding: 'utf8'
+    });
+}
+exports.issueCommand = issueCommand;
+//# sourceMappingURL=file-command.js.map
 
 /***/ }),
 
@@ -4076,6 +4024,231 @@ exports.FetchError = FetchError;
 
 /***/ }),
 
+/***/ 378:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+const core = __webpack_require__(470);
+
+let api;
+async function setAPI(newAPI) {
+  api = newAPI;
+}
+
+const PROJECT_CARD_CONTENT_FIELDS = `
+id
+title
+state
+body
+labels(first: 20) {
+  nodes {
+    name
+  }
+}
+`.trim();
+
+const PROJECT_CARD_FIELDS = `
+id
+note
+content {
+  ... on Issue {
+    ${PROJECT_CARD_CONTENT_FIELDS}
+  }
+  ... on PullRequest {
+    ${PROJECT_CARD_CONTENT_FIELDS}
+  }
+}
+`.trim();
+
+const PROJECT_COLUMN_FIELDS = `
+id
+name
+url
+project {
+  name
+}
+cards(first: 50, archivedStates: [NOT_ARCHIVED], after: $after) {
+  nodes {
+    ${PROJECT_CARD_FIELDS}
+  }
+  pageInfo {
+    hasNextPage
+    endCursor
+  }
+}
+`.trim();
+
+const GET_SINGLE_PROJECT_COLUMN = `
+query($id: ID!, $after: String) {
+  column: node(id: $id) {
+    ... on ProjectColumn {
+      ${PROJECT_COLUMN_FIELDS}
+    }
+  }
+}
+`.trim();
+
+// Paginate project cards from all columns if/as needed
+async function paginateColumnCards(columns) {
+  for (let i = 0; i < columns.length; i += 1) {
+    const originalColumn = columns[i];
+
+    let currentColumn = originalColumn;
+    while (currentColumn.cards.pageInfo.hasNextPage) {
+      core.info(
+        `paginating ${currentColumn.project.name}:${currentColumn.name} after ${currentColumn.cards.pageInfo.endCursor}`
+      );
+
+      // eslint-disable-next-line no-await-in-loop
+      const { column } = await api(GET_SINGLE_PROJECT_COLUMN, {
+        id: currentColumn.id,
+        after: currentColumn.cards.pageInfo.endCursor
+      });
+
+      originalColumn.cards.nodes.push(...column.cards.nodes);
+      currentColumn = column;
+    }
+  }
+}
+
+const GET_PROJECT_COLUMNS = `
+query($sourceColumnIds: [ID!]!, $targetColumnId: ID!, $after: String) {
+  sourceColumns: nodes(ids: $sourceColumnIds) {
+    ... on ProjectColumn {
+      ${PROJECT_COLUMN_FIELDS}
+    }
+  }
+  targetColumn: node(id: $targetColumnId) {
+    ... on ProjectColumn {
+      ${PROJECT_COLUMN_FIELDS}
+    }
+  }
+}
+`.trim();
+
+async function getProjectColumns(sourceColumnIds, targetColumnId) {
+  const { sourceColumns, targetColumn } = await api(GET_PROJECT_COLUMNS, {
+    sourceColumnIds,
+    targetColumnId
+  });
+
+  // paginate to gather all cards if needed
+  await paginateColumnCards([...sourceColumns, targetColumn]);
+
+  return { sourceColumns, targetColumn };
+}
+
+const ADD_PROJECT_CARD = `
+mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
+  addProjectCard(input: { projectColumnId: $columnId, contentId: $contentId, note: $note }) {
+    cardEdge {
+      node {
+        ${PROJECT_CARD_FIELDS}
+      }
+    }
+  }
+}
+`.trim();
+
+// Call the GitHub API to add a card to a project column
+// Returns an array of [added card, index card was added at]
+async function addCardToColumn(column, card) {
+  const cardData = {};
+  if (card.content) {
+    cardData.contentId = card.content.id;
+  } else {
+    cardData.note = card.note;
+  }
+
+  try {
+    const response = await api(ADD_PROJECT_CARD, {
+      columnId: column.id,
+      ...cardData
+    });
+
+    return response.addProjectCard.cardEdge.node;
+  } catch (error) {
+    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
+    core.warning(error.message);
+    return null;
+  }
+}
+
+const MOVE_PROJECT_CARD = `
+mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
+  moveProjectCard(input: { cardId: $cardId, columnId: $columnId, afterCardId: $afterCardId }) {
+    cardEdge {
+      node {
+        ${PROJECT_CARD_FIELDS}
+      }
+    }
+  }
+}
+`.trim();
+
+// Call the GitHub API to move a card in a project column
+// Returns the moved card.
+async function moveCardToIndex(column, fromIndex, toIndex) {
+  if (toIndex === fromIndex) {
+    return column.cards.nodes[toIndex];
+  }
+
+  let afterCardId = null;
+  if (toIndex >= column.cards.nodes.length) {
+    afterCardId = column.cards.nodes[column.cards.nodes.length - 1].id;
+  } else if (toIndex > 0) {
+    if (toIndex > fromIndex) {
+      // if toIndex > fromIndex, e.g. moving from index 0 to index 1,
+      // then the "after card" is the card currently at index 1
+      afterCardId = column.cards.nodes[toIndex].id;
+    } else {
+      // if toIndex < fromIndex, e.g. moving from index 2 to index 1,
+      // then the "after card" is the card currently at index 0
+      afterCardId = column.cards.nodes[toIndex - 1].id;
+    }
+  }
+
+  const moveData = {
+    cardId: column.cards.nodes[fromIndex].id,
+    columnId: column.id,
+    afterCardId
+  };
+
+  const response = await api(MOVE_PROJECT_CARD, moveData);
+  return response.moveProjectCard.cardEdge.node;
+}
+
+const DELETE_PROJECT_CARD = `
+mutation deleteProjectCard($cardId: ID!) {
+  deleteProjectCard(input: { cardId: $cardId }) {
+    deletedCardId
+  }
+}
+`.trim();
+
+async function deleteCardAtIndex(column, index) {
+  const card = column.cards.nodes[index];
+  const response = await api(DELETE_PROJECT_CARD, { cardId: card.id });
+  return response.deleteProjectCard.deletedCardId;
+}
+
+module.exports = {
+  setAPI,
+  getProjectColumns,
+  addCardToColumn,
+  moveCardToIndex,
+  deleteCardAtIndex,
+  queries: {
+    GET_PROJECT_COLUMNS,
+    GET_SINGLE_PROJECT_COLUMN,
+    ADD_PROJECT_CARD,
+    MOVE_PROJECT_CARD,
+    DELETE_PROJECT_CARD
+  }
+};
+
+
+/***/ }),
+
 /***/ 385:
 /***/ (function(__unusedmodule, exports, __webpack_require__) {
 
@@ -4562,17 +4735,25 @@ function errname(uv, code) {
 
 "use strict";
 
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const os = __webpack_require__(87);
+const os = __importStar(__webpack_require__(87));
+const utils_1 = __webpack_require__(82);
 /**
  * Commands
  *
  * Command Format:
- *   ##[name key=value;key=value]message
+ *   ::name key=value,key=value::message
  *
  * Examples:
- *   ##[warning]This is the user warning message
- *   ##[set-secret name=mypassword]definitelyNotAPassword!
+ *   ::warning::This is the message
+ *   ::set-env name=MY_VAR::some value
  */
 function issueCommand(command, properties, message) {
     const cmd = new Command(command, properties, message);
@@ -4597,34 +4778,39 @@ class Command {
         let cmdStr = CMD_STRING + this.command;
         if (this.properties && Object.keys(this.properties).length > 0) {
             cmdStr += ' ';
+            let first = true;
             for (const key in this.properties) {
                 if (this.properties.hasOwnProperty(key)) {
                     const val = this.properties[key];
                     if (val) {
-                        // safely append the val - avoid blowing up when attempting to
-                        // call .replace() if message is not a string for some reason
-                        cmdStr += `${key}=${escape(`${val || ''}`)},`;
+                        if (first) {
+                            first = false;
+                        }
+                        else {
+                            cmdStr += ',';
+                        }
+                        cmdStr += `${key}=${escapeProperty(val)}`;
                     }
                 }
             }
         }
-        cmdStr += CMD_STRING;
-        // safely append the message - avoid blowing up when attempting to
-        // call .replace() if message is not a string for some reason
-        const message = `${this.message || ''}`;
-        cmdStr += escapeData(message);
+        cmdStr += `${CMD_STRING}${escapeData(this.message)}`;
         return cmdStr;
     }
 }
 function escapeData(s) {
-    return s.replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+    return utils_1.toCommandValue(s)
+        .replace(/%/g, '%25')
+        .replace(/\r/g, '%0D')
+        .replace(/\n/g, '%0A');
 }
-function escape(s) {
-    return s
+function escapeProperty(s) {
+    return utils_1.toCommandValue(s)
+        .replace(/%/g, '%25')
         .replace(/\r/g, '%0D')
         .replace(/\n/g, '%0A')
-        .replace(/]/g, '%5D')
-        .replace(/;/g, '%3B');
+        .replace(/:/g, '%3A')
+        .replace(/,/g, '%2C');
 }
 //# sourceMappingURL=command.js.map
 
@@ -4849,10 +5035,19 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const command_1 = __webpack_require__(431);
-const os = __webpack_require__(87);
-const path = __webpack_require__(622);
+const file_command_1 = __webpack_require__(102);
+const utils_1 = __webpack_require__(82);
+const os = __importStar(__webpack_require__(87));
+const path = __importStar(__webpack_require__(622));
 /**
  * The code to exit an action
  */
@@ -4873,11 +5068,21 @@ var ExitCode;
 /**
  * Sets env variable for this action and future actions in the job
  * @param name the name of the variable to set
- * @param val the value of the variable
+ * @param val the value of the variable. Non-string values will be converted to a string via JSON.stringify
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function exportVariable(name, val) {
-    process.env[name] = val;
-    command_1.issueCommand('set-env', { name }, val);
+    const convertedVal = utils_1.toCommandValue(val);
+    process.env[name] = convertedVal;
+    const filePath = process.env['GITHUB_ENV'] || '';
+    if (filePath) {
+        const delimiter = '_GitHubActionsFileCommandDelimeter_';
+        const commandValue = `${name}<<${delimiter}${os.EOL}${convertedVal}${os.EOL}${delimiter}`;
+        file_command_1.issueCommand('ENV', commandValue);
+    }
+    else {
+        command_1.issueCommand('set-env', { name }, convertedVal);
+    }
 }
 exports.exportVariable = exportVariable;
 /**
@@ -4893,7 +5098,13 @@ exports.setSecret = setSecret;
  * @param inputPath
  */
 function addPath(inputPath) {
-    command_1.issueCommand('add-path', {}, inputPath);
+    const filePath = process.env['GITHUB_PATH'] || '';
+    if (filePath) {
+        file_command_1.issueCommand('PATH', inputPath);
+    }
+    else {
+        command_1.issueCommand('add-path', {}, inputPath);
+    }
     process.env['PATH'] = `${inputPath}${path.delimiter}${process.env['PATH']}`;
 }
 exports.addPath = addPath;
@@ -4916,12 +5127,22 @@ exports.getInput = getInput;
  * Sets the value of an output.
  *
  * @param     name     name of the output to set
- * @param     value    value to store
+ * @param     value    value to store. Non-string values will be converted to a string via JSON.stringify
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function setOutput(name, value) {
     command_1.issueCommand('set-output', { name }, value);
 }
 exports.setOutput = setOutput;
+/**
+ * Enables or disables the echoing of commands into stdout for the rest of the step.
+ * Echoing is disabled by default if ACTIONS_STEP_DEBUG is not set.
+ *
+ */
+function setCommandEcho(enabled) {
+    command_1.issue('echo', enabled ? 'on' : 'off');
+}
+exports.setCommandEcho = setCommandEcho;
 //-----------------------------------------------------------------------
 // Results
 //-----------------------------------------------------------------------
@@ -4939,6 +5160,13 @@ exports.setFailed = setFailed;
 // Logging Commands
 //-----------------------------------------------------------------------
 /**
+ * Gets whether Actions Step Debug is on or not
+ */
+function isDebug() {
+    return process.env['RUNNER_DEBUG'] === '1';
+}
+exports.isDebug = isDebug;
+/**
  * Writes debug message to user log
  * @param message debug message
  */
@@ -4948,18 +5176,18 @@ function debug(message) {
 exports.debug = debug;
 /**
  * Adds an error issue
- * @param message error issue message
+ * @param message error issue message. Errors will be converted to string via toString()
  */
 function error(message) {
-    command_1.issue('error', message);
+    command_1.issue('error', message instanceof Error ? message.toString() : message);
 }
 exports.error = error;
 /**
  * Adds an warning issue
- * @param message warning issue message
+ * @param message warning issue message. Errors will be converted to string via toString()
  */
 function warning(message) {
-    command_1.issue('warning', message);
+    command_1.issue('warning', message instanceof Error ? message.toString() : message);
 }
 exports.warning = warning;
 /**
@@ -5017,8 +5245,9 @@ exports.group = group;
  * Saves state for current action, the state can only be retrieved by this action's post job execution.
  *
  * @param     name     name of the state to store
- * @param     value    value to store
+ * @param     value    value to store. Non-string values will be converted to a string via JSON.stringify
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function saveState(name, value) {
     command_1.issueCommand('save-state', { name }, value);
 }
@@ -5202,7 +5431,36 @@ function filterIgnored(cards) {
   });
 }
 
+const AUTOMATION_NOTE_COMMENT = '<!-- automation-notice -->';
+const newAutomationNote = () =>
+  `${AUTOMATION_NOTE_COMMENT}
+**DO NOT EDIT** This column is automatically managed.
+`.trim();
+
+function findAutomationNote(column) {
+  const cards = column.cards.nodes;
+  const index = cards.findIndex(c => c.note && c.note.includes(AUTOMATION_NOTE_COMMENT));
+  return [cards[index], index];
+}
+
+const getColumnHeaderComment = column => `<!-- column-notice: ${column.id} -->`;
+const newColumnHeaderNote = column =>
+  `${getColumnHeaderComment(column)}
+The following cards are from the [${column.project.name}'s '${column.name}' column](${column.url}).
+`.trim();
+
+function findColumnHeaderNote(column, linkedColumn) {
+  const columnHeaderComment = getColumnHeaderComment(linkedColumn);
+  const cards = column.cards.nodes;
+  const index = cards.findIndex(c => c.note && c.note.includes(columnHeaderComment));
+  return [cards[index], index];
+}
+
 module.exports = {
+  newAutomationNote,
+  findAutomationNote,
+  newColumnHeaderNote,
+  findColumnHeaderNote,
   getInputList,
   filters: {
     type: filterByType,
@@ -5939,57 +6197,14 @@ module.exports = function (x) {
 
 const core = __webpack_require__(470);
 const octokit = __webpack_require__(898);
-const queries = __webpack_require__(63);
+const api = __webpack_require__(378);
 const utils = __webpack_require__(543);
-
-const AUTOMATION_NOTE_HEADER = `
-**DO NOT EDIT**
-This column is automatically populated from the following columns:
-`.trim();
-const AUTOMATION_NOTE_COLUMN_REFERENCE = `
-- [<project name>'s '<column name>' column](<column url>).
-`.trim();
-
-function getAutomationNote(columns) {
-  const columnReferences = columns.map(column => {
-    return AUTOMATION_NOTE_COLUMN_REFERENCE.replace('<column name>', column.name)
-      .replace('<column url>', column.url.replace('/columns/', '#column-'))
-      .replace('<project name>', column.project.name);
-  });
-
-  return `
-${AUTOMATION_NOTE_HEADER}
-${columnReferences.join('\n')}
-`.trim();
-}
-
-// Paginate project cards from all columns if/as needed
-async function paginateColumnCards(api, columns) {
-  for (let i = 0; i < columns.length; i += 1) {
-    const originalColumn = columns[i];
-
-    let currentColumn = originalColumn;
-    while (currentColumn.cards.pageInfo.hasNextPage) {
-      core.info(
-        `paginating ${currentColumn.project.name}:${currentColumn.name} after ${currentColumn.cards.pageInfo.endCursor}`
-      );
-
-      // eslint-disable-next-line no-await-in-loop
-      const { column } = await api(queries.GET_SINGLE_PROJECT_COLUMN, {
-        id: currentColumn.id,
-        after: currentColumn.cards.pageInfo.endCursor
-      });
-
-      originalColumn.cards.nodes.push(...column.cards.nodes);
-      currentColumn = column;
-    }
-  }
-}
 
 // Find a card in an array of cards based on it's linked content, or it's note.
 // Returns an array of [found card, index of found card]
-function findCard(card, cards) {
+function findCard(column, card) {
   let index = -1;
+  const cards = column.cards.nodes;
   if (card.content) {
     index = cards.findIndex(targetCard => targetCard.content && targetCard.content.id === card.content.id);
   } else {
@@ -6003,40 +6218,28 @@ function findCard(card, cards) {
   return [cards[index], index];
 }
 
-// Call the GitHub API to add a card to a project column
-// Returns an array of [added card, index card was added at]
-async function addCard(api, card, column) {
-  const cardData = {};
-  if (card.content) {
-    cardData.contentId = card.content.id;
-  } else {
-    cardData.note = card.note;
+async function ensureCardAtIndex(column, toIndex, findCardFunc, newCardFunc) {
+  let [card, currentIndex] = findCardFunc();
+  if (!card) {
+    // add card to remote project column cards
+    card = await api.addCardToColumn(column, newCardFunc());
+    currentIndex = 0;
+
+    // add the card to the local column cards
+    column.cards.nodes.splice(0, 0, card);
   }
 
-  try {
-    const response = await api(queries.ADD_PROJECT_CARD, {
-      columnId: column.id,
-      ...cardData
-    });
-    return [response.addProjectCard.cardEdge.node, 0];
-  } catch (error) {
-    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
-    core.warning(error.message);
-    return [null, -1];
+  if (card && currentIndex !== toIndex) {
+    // move card in remote project column cards
+    card = await api.moveCardToIndex(column, currentIndex, toIndex);
+
+    // remove the card from it's original index
+    column.cards.nodes.splice(currentIndex, 1);
+    // and add the card returned from moveCard at the destination index
+    column.cards.nodes.splice(toIndex, 0, card);
   }
-}
 
-// Call the GitHub API to move a card in a project column
-// Returns the moved card.
-async function moveCard(api, card, column, afterCard) {
-  const moveData = {
-    cardId: card.id,
-    columnId: column.id,
-    afterCardId: afterCard ? afterCard.id : null
-  };
-
-  const response = await api(queries.MOVE_PROJECT_CARD, moveData);
-  return response.moveProjectCard.cardEdge.node;
+  return card;
 }
 
 // Apply an array of filters to an array of cards.
@@ -6047,93 +6250,93 @@ function applyFilters(cards, filterFunctions) {
 
 async function run() {
   try {
-    const api = octokit.graphql.defaults({
-      headers: {
-        authorization: `token ${core.getInput('github_token', { required: true })}`
-      }
-    });
-
     const sourceColumnIds = utils.getInputList(core.getInput('source_column_id', { required: true }));
     const targetColumnId = core.getInput('target_column_id', { required: true });
+    const addSourceColumnNotes = core.getInput('source_column_notices').toLowerCase() === 'true';
+    const addAutomationNote = core.getInput('automation_notice').toLowerCase() === 'true';
 
-    const { sourceColumns, targetColumn } = await api(queries.GET_PROJECT_COLUMNS, {
-      sourceColumnIds,
-      targetColumnId
-    });
+    api.setAPI(
+      octokit.graphql.defaults({
+        headers: {
+          authorization: `token ${core.getInput('github_token', { required: true })}`
+        }
+      })
+    );
 
-    // paginate to gather all cards if needed
-    await paginateColumnCards(api, [...sourceColumns, targetColumn]);
+    const { sourceColumns, targetColumn } = await api.getProjectColumns(sourceColumnIds, targetColumnId);
 
-    // apply user supplied filters to cards from the source column and mirror the
-    // target column based on the remaining filters
-    const sourceCards = sourceColumns.flatMap(column => {
-      return applyFilters(column.cards.nodes, [...Object.values(utils.filters)]);
-    });
-    const targetCards = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
-
-    // prepend the automation note card to the filtered source cards, so that
-    // it will be created if needed in the target column.
-    const addNoteInput = core.getInput('add_note');
-    if (addNoteInput.toLowerCase() === 'true') {
-      sourceCards.unshift({ note: getAutomationNote(sourceColumns) });
+    // filter ignored cards from the target column
+    targetColumn.cards.nodes = applyFilters(targetColumn.cards.nodes, [utils.filters.ignored]);
+    // apply all filters to source columns
+    // eslint-disable-next-line no-restricted-syntax
+    for (const sourceColumn of sourceColumns) {
+      sourceColumn.cards.nodes = applyFilters(sourceColumn.cards.nodes, [...Object.values(utils.filters)]);
     }
 
-    // delete all cards in target column that do not exist in the source column,
-    // except for the automation note
-    for (let index = targetCards.length - 1; index >= 0; index -= 1) {
-      const targetCard = targetCards[index];
-      const [sourceCard] = findCard(targetCard, sourceCards);
+    let targetIndex = 0;
 
-      if (!sourceCard) {
-        // this loop is dependent on ordering and cannot be parallelized
-        // eslint-disable-next-line no-await-in-loop
-        await api(queries.DELETE_PROJECT_CARD, { cardId: targetCard.id });
-        targetCards.splice(index, 1);
+    // ensure the automation note is in the correct position if enabled
+    if (addAutomationNote) {
+      const card = await ensureCardAtIndex(
+        targetColumn,
+        targetIndex,
+        () => utils.findAutomationNote(targetColumn),
+        () => ({ note: utils.newAutomationNote(sourceColumns) })
+      );
+
+      if (card) {
+        targetIndex += 1;
       }
     }
 
-    // make sure cards from the source column are in target column,
-    // in the correct order
-    for (let sourceIndex = 0; sourceIndex < sourceCards.length; sourceIndex += 1) {
-      const sourceCard = sourceCards[sourceIndex];
-      let [targetCard, targetIndex] = findCard(sourceCard, targetCards);
-
-      // since we are iterating through the list from 0 to length,
-      // we can assume that the targetCards array less than source index is
-      // in the proper order.
-      // this card needs to be found before further mutating the target cards
-      // array during this loop iteration
-      let afterCard = null;
-
-      if (sourceIndex > targetCards.length) {
-        afterCard = targetCards[targetCards.length - 1];
-      } else if (sourceIndex > 0) {
-        afterCard = targetCards[sourceIndex - 1];
-      }
-
-      // add the card if it doesn't yet exist
-      if (!targetCard) {
+    // make sure the target column matches the contents from all source columns
+    // eslint-disable-next-line no-restricted-syntax
+    for (const sourceColumn of sourceColumns) {
+      // ensure that source column notes are in the correct position if enabled
+      if (addSourceColumnNotes) {
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
-        [targetCard, targetIndex] = await addCard(api, sourceCard, targetColumn);
+        const card = await ensureCardAtIndex(
+          targetColumn,
+          targetIndex,
+          () => utils.findColumnHeaderNote(targetColumn, sourceColumn),
+          () => ({ note: utils.newColumnHeaderNote(sourceColumn) })
+        );
 
-        // add new card to local array and set index based on it's index in the column
-        if (targetCard) {
-          targetCards.splice(targetIndex, 0, targetCard);
+        if (card) {
+          targetIndex += 1;
         }
       }
 
-      // move the card if it's not at the correct location
-      if (targetCard && targetIndex !== sourceIndex) {
+      // sync the contents from the source column to the correct position in the
+      // target column
+      // eslint-disable-next-line no-restricted-syntax
+      for (const sourceCard of sourceColumn.cards.nodes) {
         // this for loop cannot be parallelized, as it is dependent on ordering
         // eslint-disable-next-line no-await-in-loop
-        targetCard = await moveCard(api, targetCard, targetColumn, afterCard);
+        const card = await ensureCardAtIndex(
+          targetColumn,
+          targetIndex,
+          () => findCard(targetColumn, sourceCard),
+          () => sourceCard
+        );
 
-        // remove the card from it's original index
-        targetCards.splice(targetIndex, 1);
-        // and add the card returned from moveCard at the destination index
-        targetCards.splice(sourceIndex, 0, targetCard);
+        if (card) {
+          targetIndex += 1;
+        }
       }
+    }
+
+    // delete remaining cards
+    while (targetColumn.cards.nodes.length > targetIndex) {
+      const deleteIndex = targetColumn.cards.nodes.length - 1;
+      // remove the card from the remote column
+      // this for loop cannot be parallelized, as it is dependent on ordering
+      // eslint-disable-next-line no-await-in-loop
+      await api.deleteCardAtIndex(targetColumn, deleteIndex);
+
+      // remove the card from the local column
+      targetColumn.cards.nodes.splice(deleteIndex, 1);
     }
   } catch (error) {
     core.setFailed(error.message);
