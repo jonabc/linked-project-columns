@@ -22,6 +22,16 @@ function findCard(column, card) {
 }
 
 async function ensureCardAtIndex(column, toIndex, findCardFunc, newCardFunc) {
+  core.info("before ensure card");
+  core.info(column.cards.nodes.map(c => {
+    if (!c) {
+      return null;
+    } else if (c.content) {
+      return c.content.title;
+    } else {
+      return c.note;
+    }
+  }));
   let [card, currentIndex] = findCardFunc();
   if (!card) {
     // add card to remote project column cards
@@ -41,6 +51,17 @@ async function ensureCardAtIndex(column, toIndex, findCardFunc, newCardFunc) {
     // and add the card returned from moveCard at the destination index
     column.cards.nodes.splice(toIndex, 0, card);
   }
+
+  core.info("after ensure card");
+  core.info(column.cards.nodes.map(c => {
+    if (!c) {
+      return null;
+    } else if (c.content) {
+      return c.content.title;
+    } else {
+      return c.note;
+    }
+  }));
 
   return card;
 }
