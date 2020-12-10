@@ -6223,10 +6223,14 @@ async function ensureCardAtIndex(column, toIndex, findCardFunc, newCardFunc) {
   if (!card) {
     // add card to remote project column cards
     card = await api.addCardToColumn(column, newCardFunc());
-    currentIndex = 0;
 
-    // add the card to the local column cards
-    column.cards.nodes.splice(0, 0, card);
+    // add card to local project column cards if API was successful
+    if (card) {
+      currentIndex = 0;
+
+      // add the card to the local column cards
+      column.cards.nodes.splice(0, 0, card);
+    }
   }
 
   if (card && currentIndex !== toIndex) {
