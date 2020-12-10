@@ -207,6 +207,20 @@ describe('linked-project-columns', () => {
     expect(api.moveCardToIndex.getCall(0).args).toEqual([targetColumn, 0, 1]);
   });
 
+  it('does not add a card to the local target column when the remote call fails', async () => {
+    sourceColumns[0].cards.nodes.push({ id: 1, note: '1' });
+    // when the remote call fails, addCardToColumn returns null.  overwrite
+    // the default method stub to return null.
+    api.addCardToColumn.returns(null);
+
+    await run();
+    expect(targetColumn.cards.nodes).toEqual([]);
+
+    expect(api.addCardToColumn.callCount).toEqual(1);
+    expect(api.addCardToColumn.getCall(0).args).toEqual([targetColumn, { id: 1, note: '1' }]);
+    expect(api.moveCardToIndex.callCount).toEqual(0);
+  });
+
   it('moves cards on the target to match the source', async () => {
     sourceColumns[0].cards.nodes.push({ id: 1, note: '1' }, { id: 2, note: '2' });
     targetColumn.cards.nodes.push({ id: 202, note: '2' }, { id: 201, note: '1' });
