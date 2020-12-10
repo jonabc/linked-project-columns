@@ -35,7 +35,7 @@ jobs:
   mirror_column:
     runs-on: ubuntu-latest
     steps:
-    - uses: jonabc/linked-project-columns@v1
+    - uses: jonabc/linked-project-columns@v2
       with:
         source_column_id: <column node id>
         target_column_id: <column node id>
