@@ -2374,7 +2374,888 @@ module.exports = require("assert");
 
 /***/ }),
 
-/***/ 369:
+/***/ 378:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+const core = __webpack_require__(470);
+
+let api;
+async function setAPI(newAPI) {
+  api = newAPI;
+}
+
+const PROJECT_CARD_CONTENT_FIELDS = `
+id
+title
+state
+body
+labels(first: 20) {
+  nodes {
+    name
+  }
+}
+`.trim();
+
+const PROJECT_CARD_FIELDS = `
+id
+note
+content {
+  ... on Issue {
+    ${PROJECT_CARD_CONTENT_FIELDS}
+  }
+  ... on PullRequest {
+    ${PROJECT_CARD_CONTENT_FIELDS}
+  }
+}
+`.trim();
+
+const PROJECT_COLUMN_FIELDS = `
+id
+name
+url
+project {
+  name
+}
+cards(first: 50, archivedStates: [NOT_ARCHIVED], after: $after) {
+  nodes {
+    ${PROJECT_CARD_FIELDS}
+  }
+  pageInfo {
+    hasNextPage
+    endCursor
+  }
+}
+`.trim();
+
+const GET_SINGLE_PROJECT_COLUMN = `
+query($id: ID!, $after: String) {
+  column: node(id: $id) {
+    ... on ProjectColumn {
+      ${PROJECT_COLUMN_FIELDS}
+    }
+  }
+}
+`.trim();
+
+// Paginate project cards from all columns if/as needed
+async function paginateColumnCards(columns) {
+  for (let i = 0; i < columns.length; i += 1) {
+    const originalColumn = columns[i];
+
+    let currentColumn = originalColumn;
+    while (currentColumn.cards.pageInfo.hasNextPage) {
+      core.info(
+        `paginating ${currentColumn.project.name}:${currentColumn.name} after ${currentColumn.cards.pageInfo.endCursor}`
+      );
+
+      // eslint-disable-next-line no-await-in-loop
+      const { column } = await api(GET_SINGLE_PROJECT_COLUMN, {
+        id: currentColumn.id,
+        after: currentColumn.cards.pageInfo.endCursor
+      });
+
+      originalColumn.cards.nodes.push(...column.cards.nodes);
+      currentColumn = column;
+    }
+  }
+}
+
+const GET_PROJECT_COLUMNS = `
+query($sourceColumnIds: [ID!]!, $targetColumnId: ID!, $after: String) {
+  sourceColumns: nodes(ids: $sourceColumnIds) {
+    ... on ProjectColumn {
+      ${PROJECT_COLUMN_FIELDS}
+    }
+  }
+  targetColumn: node(id: $targetColumnId) {
+    ... on ProjectColumn {
+      ${PROJECT_COLUMN_FIELDS}
+    }
+  }
+}
+`.trim();
+
+async function getProjectColumns(sourceColumnIds, targetColumnId) {
+  const { sourceColumns, targetColumn } = await api(GET_PROJECT_COLUMNS, {
+    sourceColumnIds,
+    targetColumnId
+  });
+
+  // paginate to gather all cards if needed
+  await paginateColumnCards([...sourceColumns, targetColumn]);
+
+  return { sourceColumns, targetColumn };
+}
+
+const ADD_PROJECT_CARD = `
+mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
+  addProjectCard(input: { projectColumnId: $columnId, contentId: $contentId, note: $note }) {
+    cardEdge {
+      node {
+        ${PROJECT_CARD_FIELDS}
+      }
+    }
+  }
+}
+`.trim();
+
+// Call the GitHub API to add a card to a project column
+// Returns an array of [added card, index card was added at]
+async function addCardToColumn(column, card) {
+  const cardData = {};
+  if (card.content) {
+    cardData.contentId = card.content.id;
+  } else {
+    cardData.note = card.note;
+  }
+
+  try {
+    const response = await api(ADD_PROJECT_CARD, {
+      columnId: column.id,
+      ...cardData
+    });
+
+    return response.addProjectCard.cardEdge.node;
+  } catch (error) {
+    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
+    core.warning(error.message);
+    return null;
+  }
+}
+
+const MOVE_PROJECT_CARD = `
+mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
+  moveProjectCard(input: { cardId: $cardId, columnId: $columnId, afterCardId: $afterCardId }) {
+    cardEdge {
+      node {
+        ${PROJECT_CARD_FIELDS}
+      }
+    }
+  }
+}
+`.trim();
+
+// Call the GitHub API to move a card in a project column
+// Returns the moved card.
+async function moveCardToIndex(column, fromIndex, toIndex) {
+  if (toIndex === fromIndex) {
+    return column.cards.nodes[toIndex];
+  }
+
+  let afterCardId = null;
+  if (toIndex >= column.cards.nodes.length) {
+    afterCardId = column.cards.nodes[column.cards.nodes.length - 1].id;
+  } else if (toIndex > 0) {
+    if (toIndex > fromIndex) {
+      // if toIndex > fromIndex, e.g. moving from index 0 to index 1,
+      // then the "after card" is the card currently at index 1
+      afterCardId = column.cards.nodes[toIndex].id;
+    } else {
+      // if toIndex < fromIndex, e.g. moving from index 2 to index 1,
+      // then the "after card" is the card currently at index 0
+      afterCardId = column.cards.nodes[toIndex - 1].id;
+    }
+  }
+
+  const moveData = {
+    cardId: column.cards.nodes[fromIndex].id,
+    columnId: column.id,
+    afterCardId
+  };
+
+  const response = await api(MOVE_PROJECT_CARD, moveData);
+  return response.moveProjectCard.cardEdge.node;
+}
+
+const DELETE_PROJECT_CARD = `
+mutation deleteProjectCard($cardId: ID!) {
+  deleteProjectCard(input: { cardId: $cardId }) {
+    deletedCardId
+  }
+}
+`.trim();
+
+async function deleteCardAtIndex(column, index) {
+  const card = column.cards.nodes[index];
+  const response = await api(DELETE_PROJECT_CARD, { cardId: card.id });
+  return response.deleteProjectCard.deletedCardId;
+}
+
+module.exports = {
+  setAPI,
+  getProjectColumns,
+  addCardToColumn,
+  moveCardToIndex,
+  deleteCardAtIndex,
+  queries: {
+    GET_PROJECT_COLUMNS,
+    GET_SINGLE_PROJECT_COLUMN,
+    ADD_PROJECT_CARD,
+    MOVE_PROJECT_CARD,
+    DELETE_PROJECT_CARD
+  }
+};
+
+
+/***/ }),
+
+/***/ 385:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, '__esModule', { value: true });
+
+function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
+
+var isPlainObject = _interopDefault(__webpack_require__(626));
+var universalUserAgent = __webpack_require__(562);
+
+function lowercaseKeys(object) {
+  if (!object) {
+    return {};
+  }
+
+  return Object.keys(object).reduce((newObj, key) => {
+    newObj[key.toLowerCase()] = object[key];
+    return newObj;
+  }, {});
+}
+
+function mergeDeep(defaults, options) {
+  const result = Object.assign({}, defaults);
+  Object.keys(options).forEach(key => {
+    if (isPlainObject(options[key])) {
+      if (!(key in defaults)) Object.assign(result, {
+        [key]: options[key]
+      });else result[key] = mergeDeep(defaults[key], options[key]);
+    } else {
+      Object.assign(result, {
+        [key]: options[key]
+      });
+    }
+  });
+  return result;
+}
+
+function merge(defaults, route, options) {
+  if (typeof route === "string") {
+    let [method, url] = route.split(" ");
+    options = Object.assign(url ? {
+      method,
+      url
+    } : {
+      url: method
+    }, options);
+  } else {
+    options = Object.assign({}, route);
+  } // lowercase header names before merging with defaults to avoid duplicates
+
+
+  options.headers = lowercaseKeys(options.headers);
+  const mergedOptions = mergeDeep(defaults || {}, options); // mediaType.previews arrays are merged, instead of overwritten
+
+  if (defaults && defaults.mediaType.previews.length) {
+    mergedOptions.mediaType.previews = defaults.mediaType.previews.filter(preview => !mergedOptions.mediaType.previews.includes(preview)).concat(mergedOptions.mediaType.previews);
+  }
+
+  mergedOptions.mediaType.previews = mergedOptions.mediaType.previews.map(preview => preview.replace(/-preview/, ""));
+  return mergedOptions;
+}
+
+function addQueryParameters(url, parameters) {
+  const separator = /\?/.test(url) ? "&" : "?";
+  const names = Object.keys(parameters);
+
+  if (names.length === 0) {
+    return url;
+  }
+
+  return url + separator + names.map(name => {
+    if (name === "q") {
+      return "q=" + parameters.q.split("+").map(encodeURIComponent).join("+");
+    }
+
+    return `${name}=${encodeURIComponent(parameters[name])}`;
+  }).join("&");
+}
+
+const urlVariableRegex = /\{[^}]+\}/g;
+
+function removeNonChars(variableName) {
+  return variableName.replace(/^\W+|\W+$/g, "").split(/,/);
+}
+
+function extractUrlVariableNames(url) {
+  const matches = url.match(urlVariableRegex);
+
+  if (!matches) {
+    return [];
+  }
+
+  return matches.map(removeNonChars).reduce((a, b) => a.concat(b), []);
+}
+
+function omit(object, keysToOmit) {
+  return Object.keys(object).filter(option => !keysToOmit.includes(option)).reduce((obj, key) => {
+    obj[key] = object[key];
+    return obj;
+  }, {});
+}
+
+// Based on https://github.com/bramstein/url-template, licensed under BSD
+// TODO: create separate package.
+//
+// Copyright (c) 2012-2014, Bram Stein
+// All rights reserved.
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+//  1. Redistributions of source code must retain the above copyright
+//     notice, this list of conditions and the following disclaimer.
+//  2. Redistributions in binary form must reproduce the above copyright
+//     notice, this list of conditions and the following disclaimer in the
+//     documentation and/or other materials provided with the distribution.
+//  3. The name of the author may not be used to endorse or promote products
+//     derived from this software without specific prior written permission.
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
+// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+// EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+// INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+// OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+// EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+/* istanbul ignore file */
+function encodeReserved(str) {
+  return str.split(/(%[0-9A-Fa-f]{2})/g).map(function (part) {
+    if (!/%[0-9A-Fa-f]/.test(part)) {
+      part = encodeURI(part).replace(/%5B/g, "[").replace(/%5D/g, "]");
+    }
+
+    return part;
+  }).join("");
+}
+
+function encodeUnreserved(str) {
+  return encodeURIComponent(str).replace(/[!'()*]/g, function (c) {
+    return "%" + c.charCodeAt(0).toString(16).toUpperCase();
+  });
+}
+
+function encodeValue(operator, value, key) {
+  value = operator === "+" || operator === "#" ? encodeReserved(value) : encodeUnreserved(value);
+
+  if (key) {
+    return encodeUnreserved(key) + "=" + value;
+  } else {
+    return value;
+  }
+}
+
+function isDefined(value) {
+  return value !== undefined && value !== null;
+}
+
+function isKeyOperator(operator) {
+  return operator === ";" || operator === "&" || operator === "?";
+}
+
+function getValues(context, operator, key, modifier) {
+  var value = context[key],
+      result = [];
+
+  if (isDefined(value) && value !== "") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      value = value.toString();
+
+      if (modifier && modifier !== "*") {
+        value = value.substring(0, parseInt(modifier, 10));
+      }
+
+      result.push(encodeValue(operator, value, isKeyOperator(operator) ? key : ""));
+    } else {
+      if (modifier === "*") {
+        if (Array.isArray(value)) {
+          value.filter(isDefined).forEach(function (value) {
+            result.push(encodeValue(operator, value, isKeyOperator(operator) ? key : ""));
+          });
+        } else {
+          Object.keys(value).forEach(function (k) {
+            if (isDefined(value[k])) {
+              result.push(encodeValue(operator, value[k], k));
+            }
+          });
+        }
+      } else {
+        const tmp = [];
+
+        if (Array.isArray(value)) {
+          value.filter(isDefined).forEach(function (value) {
+            tmp.push(encodeValue(operator, value));
+          });
+        } else {
+          Object.keys(value).forEach(function (k) {
+            if (isDefined(value[k])) {
+              tmp.push(encodeUnreserved(k));
+              tmp.push(encodeValue(operator, value[k].toString()));
+            }
+          });
+        }
+
+        if (isKeyOperator(operator)) {
+          result.push(encodeUnreserved(key) + "=" + tmp.join(","));
+        } else if (tmp.length !== 0) {
+          result.push(tmp.join(","));
+        }
+      }
+    }
+  } else {
+    if (operator === ";") {
+      if (isDefined(value)) {
+        result.push(encodeUnreserved(key));
+      }
+    } else if (value === "" && (operator === "&" || operator === "?")) {
+      result.push(encodeUnreserved(key) + "=");
+    } else if (value === "") {
+      result.push("");
+    }
+  }
+
+  return result;
+}
+
+function parseUrl(template) {
+  return {
+    expand: expand.bind(null, template)
+  };
+}
+
+function expand(template, context) {
+  var operators = ["+", "#", ".", "/", ";", "?", "&"];
+  return template.replace(/\{([^\{\}]+)\}|([^\{\}]+)/g, function (_, expression, literal) {
+    if (expression) {
+      let operator = "";
+      const values = [];
+
+      if (operators.indexOf(expression.charAt(0)) !== -1) {
+        operator = expression.charAt(0);
+        expression = expression.substr(1);
+      }
+
+      expression.split(/,/g).forEach(function (variable) {
+        var tmp = /([^:\*]*)(?::(\d+)|(\*))?/.exec(variable);
+        values.push(getValues(context, operator, tmp[1], tmp[2] || tmp[3]));
+      });
+
+      if (operator && operator !== "+") {
+        var separator = ",";
+
+        if (operator === "?") {
+          separator = "&";
+        } else if (operator !== "#") {
+          separator = operator;
+        }
+
+        return (values.length !== 0 ? operator : "") + values.join(separator);
+      } else {
+        return values.join(",");
+      }
+    } else {
+      return encodeReserved(literal);
+    }
+  });
+}
+
+function parse(options) {
+  // https://fetch.spec.whatwg.org/#methods
+  let method = options.method.toUpperCase(); // replace :varname with {varname} to make it RFC 6570 compatible
+
+  let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{+$1}");
+  let headers = Object.assign({}, options.headers);
+  let body;
+  let parameters = omit(options, ["method", "baseUrl", "url", "headers", "request", "mediaType"]); // extract variable names from URL to calculate remaining variables later
+
+  const urlVariableNames = extractUrlVariableNames(url);
+  url = parseUrl(url).expand(parameters);
+
+  if (!/^http/.test(url)) {
+    url = options.baseUrl + url;
+  }
+
+  const omittedParameters = Object.keys(options).filter(option => urlVariableNames.includes(option)).concat("baseUrl");
+  const remainingParameters = omit(parameters, omittedParameters);
+  const isBinaryRequset = /application\/octet-stream/i.test(headers.accept);
+
+  if (!isBinaryRequset) {
+    if (options.mediaType.format) {
+      // e.g. application/vnd.github.v3+json => application/vnd.github.v3.raw
+      headers.accept = headers.accept.split(/,/).map(preview => preview.replace(/application\/vnd(\.\w+)(\.v3)?(\.\w+)?(\+json)?$/, `application/vnd$1$2.${options.mediaType.format}`)).join(",");
+    }
+
+    if (options.mediaType.previews.length) {
+      const previewsFromAcceptHeader = headers.accept.match(/[\w-]+(?=-preview)/g) || [];
+      headers.accept = previewsFromAcceptHeader.concat(options.mediaType.previews).map(preview => {
+        const format = options.mediaType.format ? `.${options.mediaType.format}` : "+json";
+        return `application/vnd.github.${preview}-preview${format}`;
+      }).join(",");
+    }
+  } // for GET/HEAD requests, set URL query parameters from remaining parameters
+  // for PATCH/POST/PUT/DELETE requests, set request body from remaining parameters
+
+
+  if (["GET", "HEAD"].includes(method)) {
+    url = addQueryParameters(url, remainingParameters);
+  } else {
+    if ("data" in remainingParameters) {
+      body = remainingParameters.data;
+    } else {
+      if (Object.keys(remainingParameters).length) {
+        body = remainingParameters;
+      } else {
+        headers["content-length"] = 0;
+      }
+    }
+  } // default content-type for JSON if body is set
+
+
+  if (!headers["content-type"] && typeof body !== "undefined") {
+    headers["content-type"] = "application/json; charset=utf-8";
+  } // GitHub expects 'content-length: 0' header for PUT/PATCH requests without body.
+  // fetch does not allow to set `content-length` header, but we can set body to an empty string
+
+
+  if (["PATCH", "PUT"].includes(method) && typeof body === "undefined") {
+    body = "";
+  } // Only return body/request keys if present
+
+
+  return Object.assign({
+    method,
+    url,
+    headers
+  }, typeof body !== "undefined" ? {
+    body
+  } : null, options.request ? {
+    request: options.request
+  } : null);
+}
+
+function endpointWithDefaults(defaults, route, options) {
+  return parse(merge(defaults, route, options));
+}
+
+function withDefaults(oldDefaults, newDefaults) {
+  const DEFAULTS = merge(oldDefaults, newDefaults);
+  const endpoint = endpointWithDefaults.bind(null, DEFAULTS);
+  return Object.assign(endpoint, {
+    DEFAULTS,
+    defaults: withDefaults.bind(null, DEFAULTS),
+    merge: merge.bind(null, DEFAULTS),
+    parse
+  });
+}
+
+const VERSION = "6.0.0";
+
+const userAgent = `octokit-endpoint.js/${VERSION} ${universalUserAgent.getUserAgent()}`; // DEFAULTS has all properties set that EndpointOptions has, except url.
+// So we use RequestParameters and add method as additional required property.
+
+const DEFAULTS = {
+  method: "GET",
+  baseUrl: "https://api.github.com",
+  headers: {
+    accept: "application/vnd.github.v3+json",
+    "user-agent": userAgent
+  },
+  mediaType: {
+    format: "",
+    previews: []
+  }
+};
+
+const endpoint = withDefaults(null, DEFAULTS);
+
+exports.endpoint = endpoint;
+//# sourceMappingURL=index.js.map
+
+
+/***/ }),
+
+/***/ 389:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+const fs = __webpack_require__(747);
+const shebangCommand = __webpack_require__(866);
+
+function readShebang(command) {
+    // Read the first 150 bytes from the file
+    const size = 150;
+    let buffer;
+
+    if (Buffer.alloc) {
+        // Node.js v4.5+ / v5.10+
+        buffer = Buffer.alloc(size);
+    } else {
+        // Old Node.js API
+        buffer = new Buffer(size);
+        buffer.fill(0); // zero-fill
+    }
+
+    let fd;
+
+    try {
+        fd = fs.openSync(command, 'r');
+        fs.readSync(fd, buffer, 0, size, 0);
+        fs.closeSync(fd);
+    } catch (e) { /* Empty */ }
+
+    // Attempt to extract shebang (null is returned if not a shebang)
+    return shebangCommand(buffer.toString());
+}
+
+module.exports = readShebang;
+
+
+/***/ }),
+
+/***/ 413:
+/***/ (function(module) {
+
+module.exports = require("stream");
+
+/***/ }),
+
+/***/ 427:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+// Older verions of Node.js might not have `util.getSystemErrorName()`.
+// In that case, fall back to a deprecated internal.
+const util = __webpack_require__(669);
+
+let uv;
+
+if (typeof util.getSystemErrorName === 'function') {
+	module.exports = util.getSystemErrorName;
+} else {
+	try {
+		uv = process.binding('uv');
+
+		if (typeof uv.errname !== 'function') {
+			throw new TypeError('uv.errname is not a function');
+		}
+	} catch (err) {
+		console.error('execa/lib/errname: unable to establish process.binding(\'uv\')', err);
+		uv = null;
+	}
+
+	module.exports = code => errname(uv, code);
+}
+
+// Used for testing the fallback behavior
+module.exports.__test__ = errname;
+
+function errname(uv, code) {
+	if (uv) {
+		return uv.errname(code);
+	}
+
+	if (!(code < 0)) {
+		throw new Error('err >= 0');
+	}
+
+	return `Unknown system error ${code}`;
+}
+
+
+
+/***/ }),
+
+/***/ 431:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const os = __importStar(__webpack_require__(87));
+const utils_1 = __webpack_require__(82);
+/**
+ * Commands
+ *
+ * Command Format:
+ *   ::name key=value,key=value::message
+ *
+ * Examples:
+ *   ::warning::This is the message
+ *   ::set-env name=MY_VAR::some value
+ */
+function issueCommand(command, properties, message) {
+    const cmd = new Command(command, properties, message);
+    process.stdout.write(cmd.toString() + os.EOL);
+}
+exports.issueCommand = issueCommand;
+function issue(name, message = '') {
+    issueCommand(name, {}, message);
+}
+exports.issue = issue;
+const CMD_STRING = '::';
+class Command {
+    constructor(command, properties, message) {
+        if (!command) {
+            command = 'missing.command';
+        }
+        this.command = command;
+        this.properties = properties;
+        this.message = message;
+    }
+    toString() {
+        let cmdStr = CMD_STRING + this.command;
+        if (this.properties && Object.keys(this.properties).length > 0) {
+            cmdStr += ' ';
+            let first = true;
+            for (const key in this.properties) {
+                if (this.properties.hasOwnProperty(key)) {
+                    const val = this.properties[key];
+                    if (val) {
+                        if (first) {
+                            first = false;
+                        }
+                        else {
+                            cmdStr += ',';
+                        }
+                        cmdStr += `${key}=${escapeProperty(val)}`;
+                    }
+                }
+            }
+        }
+        cmdStr += `${CMD_STRING}${escapeData(this.message)}`;
+        return cmdStr;
+    }
+}
+function escapeData(s) {
+    return utils_1.toCommandValue(s)
+        .replace(/%/g, '%25')
+        .replace(/\r/g, '%0D')
+        .replace(/\n/g, '%0A');
+}
+function escapeProperty(s) {
+    return utils_1.toCommandValue(s)
+        .replace(/%/g, '%25')
+        .replace(/\r/g, '%0D')
+        .replace(/\n/g, '%0A')
+        .replace(/:/g, '%3A')
+        .replace(/,/g, '%2C');
+}
+//# sourceMappingURL=command.js.map
+
+/***/ }),
+
+/***/ 453:
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+var once = __webpack_require__(969)
+var eos = __webpack_require__(9)
+var fs = __webpack_require__(747) // we only need fs to get the ReadStream and WriteStream prototypes
+
+var noop = function () {}
+var ancient = /^v?\.0/.test(process.version)
+
+var isFn = function (fn) {
+  return typeof fn === 'function'
+}
+
+var isFS = function (stream) {
+  if (!ancient) return false // newer node version do not need to care about fs is a special way
+  if (!fs) return false // browser
+  return (stream instanceof (fs.ReadStream || noop) || stream instanceof (fs.WriteStream || noop)) && isFn(stream.close)
+}
+
+var isRequest = function (stream) {
+  return stream.setHeader && isFn(stream.abort)
+}
+
+var destroyer = function (stream, reading, writing, callback) {
+  callback = once(callback)
+
+  var closed = false
+  stream.on('close', function () {
+    closed = true
+  })
+
+  eos(stream, {readable: reading, writable: writing}, function (err) {
+    if (err) return callback(err)
+    closed = true
+    callback()
+  })
+
+  var destroyed = false
+  return function (err) {
+    if (closed) return
+    if (destroyed) return
+    destroyed = true
+
+    if (isFS(stream)) return stream.close(noop) // use close for fs streams to avoid fd leaks
+    if (isRequest(stream)) return stream.abort() // request.destroy just do .end - .abort is what we want
+
+    if (isFn(stream.destroy)) return stream.destroy()
+
+    callback(err || new Error('stream was destroyed'))
+  }
+}
+
+var call = function (fn) {
+  fn()
+}
+
+var pipe = function (from, to) {
+  return from.pipe(to)
+}
+
+var pump = function () {
+  var streams = Array.prototype.slice.call(arguments)
+  var callback = isFn(streams[streams.length - 1] || noop) && streams.pop() || noop
+
+  if (Array.isArray(streams[0])) streams = streams[0]
+  if (streams.length < 2) throw new Error('pump requires two streams per minimum')
+
+  var error
+  var destroys = streams.map(function (stream, i) {
+    var reading = i < streams.length - 1
+    var writing = i > 0
+    return destroyer(stream, reading, writing, function (err) {
+      if (!error) error = err
+      if (err) destroys.forEach(call)
+      if (reading) return
+      destroys.forEach(call)
+      callback(error)
+    })
+  })
+
+  return streams.reduce(pipe)
+}
+
+module.exports = pump
+
+
+/***/ }),
+
+/***/ 454:
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -2845,6 +3726,12 @@ function convertBody(buffer, headers) {
 	// html4
 	if (!res && str) {
 		res = /<meta[\s]+?http-equiv=(['"])content-type\1[\s]+?content=(['"])(.+?)\2/i.exec(str);
+		if (!res) {
+			res = /<meta[\s]+?content=(['"])(.+?)\1[\s]+?http-equiv=(['"])content-type\3/i.exec(str);
+			if (res) {
+				res.pop(); // drop last quote
+			}
+		}
 
 		if (res) {
 			res = /charset=(.*)/i.exec(res.pop());
@@ -3852,7 +4739,7 @@ function fetch(url, opts) {
 				// HTTP fetch step 5.5
 				switch (request.redirect) {
 					case 'error':
-						reject(new FetchError(`redirect mode is set to error: ${request.url}`, 'no-redirect'));
+						reject(new FetchError(`uri requested responds with a redirect, redirect mode is set to error: ${request.url}`, 'no-redirect'));
 						finalize();
 						return;
 					case 'manual':
@@ -3891,7 +4778,8 @@ function fetch(url, opts) {
 							method: request.method,
 							body: request.body,
 							signal: request.signal,
-							timeout: request.timeout
+							timeout: request.timeout,
+							size: request.size
 						};
 
 						// HTTP-redirect fetch step 9
@@ -4020,887 +4908,6 @@ exports.Headers = Headers;
 exports.Request = Request;
 exports.Response = Response;
 exports.FetchError = FetchError;
-
-
-/***/ }),
-
-/***/ 378:
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-const core = __webpack_require__(470);
-
-let api;
-async function setAPI(newAPI) {
-  api = newAPI;
-}
-
-const PROJECT_CARD_CONTENT_FIELDS = `
-id
-title
-state
-body
-labels(first: 20) {
-  nodes {
-    name
-  }
-}
-`.trim();
-
-const PROJECT_CARD_FIELDS = `
-id
-note
-content {
-  ... on Issue {
-    ${PROJECT_CARD_CONTENT_FIELDS}
-  }
-  ... on PullRequest {
-    ${PROJECT_CARD_CONTENT_FIELDS}
-  }
-}
-`.trim();
-
-const PROJECT_COLUMN_FIELDS = `
-id
-name
-url
-project {
-  name
-}
-cards(first: 50, archivedStates: [NOT_ARCHIVED], after: $after) {
-  nodes {
-    ${PROJECT_CARD_FIELDS}
-  }
-  pageInfo {
-    hasNextPage
-    endCursor
-  }
-}
-`.trim();
-
-const GET_SINGLE_PROJECT_COLUMN = `
-query($id: ID!, $after: String) {
-  column: node(id: $id) {
-    ... on ProjectColumn {
-      ${PROJECT_COLUMN_FIELDS}
-    }
-  }
-}
-`.trim();
-
-// Paginate project cards from all columns if/as needed
-async function paginateColumnCards(columns) {
-  for (let i = 0; i < columns.length; i += 1) {
-    const originalColumn = columns[i];
-
-    let currentColumn = originalColumn;
-    while (currentColumn.cards.pageInfo.hasNextPage) {
-      core.info(
-        `paginating ${currentColumn.project.name}:${currentColumn.name} after ${currentColumn.cards.pageInfo.endCursor}`
-      );
-
-      // eslint-disable-next-line no-await-in-loop
-      const { column } = await api(GET_SINGLE_PROJECT_COLUMN, {
-        id: currentColumn.id,
-        after: currentColumn.cards.pageInfo.endCursor
-      });
-
-      originalColumn.cards.nodes.push(...column.cards.nodes);
-      currentColumn = column;
-    }
-  }
-}
-
-const GET_PROJECT_COLUMNS = `
-query($sourceColumnIds: [ID!]!, $targetColumnId: ID!, $after: String) {
-  sourceColumns: nodes(ids: $sourceColumnIds) {
-    ... on ProjectColumn {
-      ${PROJECT_COLUMN_FIELDS}
-    }
-  }
-  targetColumn: node(id: $targetColumnId) {
-    ... on ProjectColumn {
-      ${PROJECT_COLUMN_FIELDS}
-    }
-  }
-}
-`.trim();
-
-async function getProjectColumns(sourceColumnIds, targetColumnId) {
-  const { sourceColumns, targetColumn } = await api(GET_PROJECT_COLUMNS, {
-    sourceColumnIds,
-    targetColumnId
-  });
-
-  // paginate to gather all cards if needed
-  await paginateColumnCards([...sourceColumns, targetColumn]);
-
-  return { sourceColumns, targetColumn };
-}
-
-const ADD_PROJECT_CARD = `
-mutation addProjectCard($columnId: ID!, $contentId: ID, $note: String) {
-  addProjectCard(input: { projectColumnId: $columnId, contentId: $contentId, note: $note }) {
-    cardEdge {
-      node {
-        ${PROJECT_CARD_FIELDS}
-      }
-    }
-  }
-}
-`.trim();
-
-// Call the GitHub API to add a card to a project column
-// Returns an array of [added card, index card was added at]
-async function addCardToColumn(column, card) {
-  const cardData = {};
-  if (card.content) {
-    cardData.contentId = card.content.id;
-  } else {
-    cardData.note = card.note;
-  }
-
-  try {
-    const response = await api(ADD_PROJECT_CARD, {
-      columnId: column.id,
-      ...cardData
-    });
-
-    return response.addProjectCard.cardEdge.node;
-  } catch (error) {
-    core.warning(`Could not add card for payload ${JSON.stringify(cardData)}`);
-    core.warning(error.message);
-    return null;
-  }
-}
-
-const MOVE_PROJECT_CARD = `
-mutation moveProjectCard($cardId: ID!, $columnId: ID!, $afterCardId: ID) {
-  moveProjectCard(input: { cardId: $cardId, columnId: $columnId, afterCardId: $afterCardId }) {
-    cardEdge {
-      node {
-        ${PROJECT_CARD_FIELDS}
-      }
-    }
-  }
-}
-`.trim();
-
-// Call the GitHub API to move a card in a project column
-// Returns the moved card.
-async function moveCardToIndex(column, fromIndex, toIndex) {
-  if (toIndex === fromIndex) {
-    return column.cards.nodes[toIndex];
-  }
-
-  let afterCardId = null;
-  if (toIndex >= column.cards.nodes.length) {
-    afterCardId = column.cards.nodes[column.cards.nodes.length - 1].id;
-  } else if (toIndex > 0) {
-    if (toIndex > fromIndex) {
-      // if toIndex > fromIndex, e.g. moving from index 0 to index 1,
-      // then the "after card" is the card currently at index 1
-      afterCardId = column.cards.nodes[toIndex].id;
-    } else {
-      // if toIndex < fromIndex, e.g. moving from index 2 to index 1,
-      // then the "after card" is the card currently at index 0
-      afterCardId = column.cards.nodes[toIndex - 1].id;
-    }
-  }
-
-  const moveData = {
-    cardId: column.cards.nodes[fromIndex].id,
-    columnId: column.id,
-    afterCardId
-  };
-
-  const response = await api(MOVE_PROJECT_CARD, moveData);
-  return response.moveProjectCard.cardEdge.node;
-}
-
-const DELETE_PROJECT_CARD = `
-mutation deleteProjectCard($cardId: ID!) {
-  deleteProjectCard(input: { cardId: $cardId }) {
-    deletedCardId
-  }
-}
-`.trim();
-
-async function deleteCardAtIndex(column, index) {
-  const card = column.cards.nodes[index];
-  const response = await api(DELETE_PROJECT_CARD, { cardId: card.id });
-  return response.deleteProjectCard.deletedCardId;
-}
-
-module.exports = {
-  setAPI,
-  getProjectColumns,
-  addCardToColumn,
-  moveCardToIndex,
-  deleteCardAtIndex,
-  queries: {
-    GET_PROJECT_COLUMNS,
-    GET_SINGLE_PROJECT_COLUMN,
-    ADD_PROJECT_CARD,
-    MOVE_PROJECT_CARD,
-    DELETE_PROJECT_CARD
-  }
-};
-
-
-/***/ }),
-
-/***/ 385:
-/***/ (function(__unusedmodule, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, '__esModule', { value: true });
-
-function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'default' in ex) ? ex['default'] : ex; }
-
-var isPlainObject = _interopDefault(__webpack_require__(626));
-var universalUserAgent = __webpack_require__(562);
-
-function lowercaseKeys(object) {
-  if (!object) {
-    return {};
-  }
-
-  return Object.keys(object).reduce((newObj, key) => {
-    newObj[key.toLowerCase()] = object[key];
-    return newObj;
-  }, {});
-}
-
-function mergeDeep(defaults, options) {
-  const result = Object.assign({}, defaults);
-  Object.keys(options).forEach(key => {
-    if (isPlainObject(options[key])) {
-      if (!(key in defaults)) Object.assign(result, {
-        [key]: options[key]
-      });else result[key] = mergeDeep(defaults[key], options[key]);
-    } else {
-      Object.assign(result, {
-        [key]: options[key]
-      });
-    }
-  });
-  return result;
-}
-
-function merge(defaults, route, options) {
-  if (typeof route === "string") {
-    let [method, url] = route.split(" ");
-    options = Object.assign(url ? {
-      method,
-      url
-    } : {
-      url: method
-    }, options);
-  } else {
-    options = Object.assign({}, route);
-  } // lowercase header names before merging with defaults to avoid duplicates
-
-
-  options.headers = lowercaseKeys(options.headers);
-  const mergedOptions = mergeDeep(defaults || {}, options); // mediaType.previews arrays are merged, instead of overwritten
-
-  if (defaults && defaults.mediaType.previews.length) {
-    mergedOptions.mediaType.previews = defaults.mediaType.previews.filter(preview => !mergedOptions.mediaType.previews.includes(preview)).concat(mergedOptions.mediaType.previews);
-  }
-
-  mergedOptions.mediaType.previews = mergedOptions.mediaType.previews.map(preview => preview.replace(/-preview/, ""));
-  return mergedOptions;
-}
-
-function addQueryParameters(url, parameters) {
-  const separator = /\?/.test(url) ? "&" : "?";
-  const names = Object.keys(parameters);
-
-  if (names.length === 0) {
-    return url;
-  }
-
-  return url + separator + names.map(name => {
-    if (name === "q") {
-      return "q=" + parameters.q.split("+").map(encodeURIComponent).join("+");
-    }
-
-    return `${name}=${encodeURIComponent(parameters[name])}`;
-  }).join("&");
-}
-
-const urlVariableRegex = /\{[^}]+\}/g;
-
-function removeNonChars(variableName) {
-  return variableName.replace(/^\W+|\W+$/g, "").split(/,/);
-}
-
-function extractUrlVariableNames(url) {
-  const matches = url.match(urlVariableRegex);
-
-  if (!matches) {
-    return [];
-  }
-
-  return matches.map(removeNonChars).reduce((a, b) => a.concat(b), []);
-}
-
-function omit(object, keysToOmit) {
-  return Object.keys(object).filter(option => !keysToOmit.includes(option)).reduce((obj, key) => {
-    obj[key] = object[key];
-    return obj;
-  }, {});
-}
-
-// Based on https://github.com/bramstein/url-template, licensed under BSD
-// TODO: create separate package.
-//
-// Copyright (c) 2012-2014, Bram Stein
-// All rights reserved.
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions
-// are met:
-//  1. Redistributions of source code must retain the above copyright
-//     notice, this list of conditions and the following disclaimer.
-//  2. Redistributions in binary form must reproduce the above copyright
-//     notice, this list of conditions and the following disclaimer in the
-//     documentation and/or other materials provided with the distribution.
-//  3. The name of the author may not be used to endorse or promote products
-//     derived from this software without specific prior written permission.
-// THIS SOFTWARE IS PROVIDED BY THE AUTHOR "AS IS" AND ANY EXPRESS OR IMPLIED
-// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-// EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-// INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
-// OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
-// EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-/* istanbul ignore file */
-function encodeReserved(str) {
-  return str.split(/(%[0-9A-Fa-f]{2})/g).map(function (part) {
-    if (!/%[0-9A-Fa-f]/.test(part)) {
-      part = encodeURI(part).replace(/%5B/g, "[").replace(/%5D/g, "]");
-    }
-
-    return part;
-  }).join("");
-}
-
-function encodeUnreserved(str) {
-  return encodeURIComponent(str).replace(/[!'()*]/g, function (c) {
-    return "%" + c.charCodeAt(0).toString(16).toUpperCase();
-  });
-}
-
-function encodeValue(operator, value, key) {
-  value = operator === "+" || operator === "#" ? encodeReserved(value) : encodeUnreserved(value);
-
-  if (key) {
-    return encodeUnreserved(key) + "=" + value;
-  } else {
-    return value;
-  }
-}
-
-function isDefined(value) {
-  return value !== undefined && value !== null;
-}
-
-function isKeyOperator(operator) {
-  return operator === ";" || operator === "&" || operator === "?";
-}
-
-function getValues(context, operator, key, modifier) {
-  var value = context[key],
-      result = [];
-
-  if (isDefined(value) && value !== "") {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      value = value.toString();
-
-      if (modifier && modifier !== "*") {
-        value = value.substring(0, parseInt(modifier, 10));
-      }
-
-      result.push(encodeValue(operator, value, isKeyOperator(operator) ? key : ""));
-    } else {
-      if (modifier === "*") {
-        if (Array.isArray(value)) {
-          value.filter(isDefined).forEach(function (value) {
-            result.push(encodeValue(operator, value, isKeyOperator(operator) ? key : ""));
-          });
-        } else {
-          Object.keys(value).forEach(function (k) {
-            if (isDefined(value[k])) {
-              result.push(encodeValue(operator, value[k], k));
-            }
-          });
-        }
-      } else {
-        const tmp = [];
-
-        if (Array.isArray(value)) {
-          value.filter(isDefined).forEach(function (value) {
-            tmp.push(encodeValue(operator, value));
-          });
-        } else {
-          Object.keys(value).forEach(function (k) {
-            if (isDefined(value[k])) {
-              tmp.push(encodeUnreserved(k));
-              tmp.push(encodeValue(operator, value[k].toString()));
-            }
-          });
-        }
-
-        if (isKeyOperator(operator)) {
-          result.push(encodeUnreserved(key) + "=" + tmp.join(","));
-        } else if (tmp.length !== 0) {
-          result.push(tmp.join(","));
-        }
-      }
-    }
-  } else {
-    if (operator === ";") {
-      if (isDefined(value)) {
-        result.push(encodeUnreserved(key));
-      }
-    } else if (value === "" && (operator === "&" || operator === "?")) {
-      result.push(encodeUnreserved(key) + "=");
-    } else if (value === "") {
-      result.push("");
-    }
-  }
-
-  return result;
-}
-
-function parseUrl(template) {
-  return {
-    expand: expand.bind(null, template)
-  };
-}
-
-function expand(template, context) {
-  var operators = ["+", "#", ".", "/", ";", "?", "&"];
-  return template.replace(/\{([^\{\}]+)\}|([^\{\}]+)/g, function (_, expression, literal) {
-    if (expression) {
-      let operator = "";
-      const values = [];
-
-      if (operators.indexOf(expression.charAt(0)) !== -1) {
-        operator = expression.charAt(0);
-        expression = expression.substr(1);
-      }
-
-      expression.split(/,/g).forEach(function (variable) {
-        var tmp = /([^:\*]*)(?::(\d+)|(\*))?/.exec(variable);
-        values.push(getValues(context, operator, tmp[1], tmp[2] || tmp[3]));
-      });
-
-      if (operator && operator !== "+") {
-        var separator = ",";
-
-        if (operator === "?") {
-          separator = "&";
-        } else if (operator !== "#") {
-          separator = operator;
-        }
-
-        return (values.length !== 0 ? operator : "") + values.join(separator);
-      } else {
-        return values.join(",");
-      }
-    } else {
-      return encodeReserved(literal);
-    }
-  });
-}
-
-function parse(options) {
-  // https://fetch.spec.whatwg.org/#methods
-  let method = options.method.toUpperCase(); // replace :varname with {varname} to make it RFC 6570 compatible
-
-  let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{+$1}");
-  let headers = Object.assign({}, options.headers);
-  let body;
-  let parameters = omit(options, ["method", "baseUrl", "url", "headers", "request", "mediaType"]); // extract variable names from URL to calculate remaining variables later
-
-  const urlVariableNames = extractUrlVariableNames(url);
-  url = parseUrl(url).expand(parameters);
-
-  if (!/^http/.test(url)) {
-    url = options.baseUrl + url;
-  }
-
-  const omittedParameters = Object.keys(options).filter(option => urlVariableNames.includes(option)).concat("baseUrl");
-  const remainingParameters = omit(parameters, omittedParameters);
-  const isBinaryRequset = /application\/octet-stream/i.test(headers.accept);
-
-  if (!isBinaryRequset) {
-    if (options.mediaType.format) {
-      // e.g. application/vnd.github.v3+json => application/vnd.github.v3.raw
-      headers.accept = headers.accept.split(/,/).map(preview => preview.replace(/application\/vnd(\.\w+)(\.v3)?(\.\w+)?(\+json)?$/, `application/vnd$1$2.${options.mediaType.format}`)).join(",");
-    }
-
-    if (options.mediaType.previews.length) {
-      const previewsFromAcceptHeader = headers.accept.match(/[\w-]+(?=-preview)/g) || [];
-      headers.accept = previewsFromAcceptHeader.concat(options.mediaType.previews).map(preview => {
-        const format = options.mediaType.format ? `.${options.mediaType.format}` : "+json";
-        return `application/vnd.github.${preview}-preview${format}`;
-      }).join(",");
-    }
-  } // for GET/HEAD requests, set URL query parameters from remaining parameters
-  // for PATCH/POST/PUT/DELETE requests, set request body from remaining parameters
-
-
-  if (["GET", "HEAD"].includes(method)) {
-    url = addQueryParameters(url, remainingParameters);
-  } else {
-    if ("data" in remainingParameters) {
-      body = remainingParameters.data;
-    } else {
-      if (Object.keys(remainingParameters).length) {
-        body = remainingParameters;
-      } else {
-        headers["content-length"] = 0;
-      }
-    }
-  } // default content-type for JSON if body is set
-
-
-  if (!headers["content-type"] && typeof body !== "undefined") {
-    headers["content-type"] = "application/json; charset=utf-8";
-  } // GitHub expects 'content-length: 0' header for PUT/PATCH requests without body.
-  // fetch does not allow to set `content-length` header, but we can set body to an empty string
-
-
-  if (["PATCH", "PUT"].includes(method) && typeof body === "undefined") {
-    body = "";
-  } // Only return body/request keys if present
-
-
-  return Object.assign({
-    method,
-    url,
-    headers
-  }, typeof body !== "undefined" ? {
-    body
-  } : null, options.request ? {
-    request: options.request
-  } : null);
-}
-
-function endpointWithDefaults(defaults, route, options) {
-  return parse(merge(defaults, route, options));
-}
-
-function withDefaults(oldDefaults, newDefaults) {
-  const DEFAULTS = merge(oldDefaults, newDefaults);
-  const endpoint = endpointWithDefaults.bind(null, DEFAULTS);
-  return Object.assign(endpoint, {
-    DEFAULTS,
-    defaults: withDefaults.bind(null, DEFAULTS),
-    merge: merge.bind(null, DEFAULTS),
-    parse
-  });
-}
-
-const VERSION = "6.0.0";
-
-const userAgent = `octokit-endpoint.js/${VERSION} ${universalUserAgent.getUserAgent()}`; // DEFAULTS has all properties set that EndpointOptions has, except url.
-// So we use RequestParameters and add method as additional required property.
-
-const DEFAULTS = {
-  method: "GET",
-  baseUrl: "https://api.github.com",
-  headers: {
-    accept: "application/vnd.github.v3+json",
-    "user-agent": userAgent
-  },
-  mediaType: {
-    format: "",
-    previews: []
-  }
-};
-
-const endpoint = withDefaults(null, DEFAULTS);
-
-exports.endpoint = endpoint;
-//# sourceMappingURL=index.js.map
-
-
-/***/ }),
-
-/***/ 389:
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-"use strict";
-
-
-const fs = __webpack_require__(747);
-const shebangCommand = __webpack_require__(866);
-
-function readShebang(command) {
-    // Read the first 150 bytes from the file
-    const size = 150;
-    let buffer;
-
-    if (Buffer.alloc) {
-        // Node.js v4.5+ / v5.10+
-        buffer = Buffer.alloc(size);
-    } else {
-        // Old Node.js API
-        buffer = new Buffer(size);
-        buffer.fill(0); // zero-fill
-    }
-
-    let fd;
-
-    try {
-        fd = fs.openSync(command, 'r');
-        fs.readSync(fd, buffer, 0, size, 0);
-        fs.closeSync(fd);
-    } catch (e) { /* Empty */ }
-
-    // Attempt to extract shebang (null is returned if not a shebang)
-    return shebangCommand(buffer.toString());
-}
-
-module.exports = readShebang;
-
-
-/***/ }),
-
-/***/ 413:
-/***/ (function(module) {
-
-module.exports = require("stream");
-
-/***/ }),
-
-/***/ 427:
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-"use strict";
-
-// Older verions of Node.js might not have `util.getSystemErrorName()`.
-// In that case, fall back to a deprecated internal.
-const util = __webpack_require__(669);
-
-let uv;
-
-if (typeof util.getSystemErrorName === 'function') {
-	module.exports = util.getSystemErrorName;
-} else {
-	try {
-		uv = process.binding('uv');
-
-		if (typeof uv.errname !== 'function') {
-			throw new TypeError('uv.errname is not a function');
-		}
-	} catch (err) {
-		console.error('execa/lib/errname: unable to establish process.binding(\'uv\')', err);
-		uv = null;
-	}
-
-	module.exports = code => errname(uv, code);
-}
-
-// Used for testing the fallback behavior
-module.exports.__test__ = errname;
-
-function errname(uv, code) {
-	if (uv) {
-		return uv.errname(code);
-	}
-
-	if (!(code < 0)) {
-		throw new Error('err >= 0');
-	}
-
-	return `Unknown system error ${code}`;
-}
-
-
-
-/***/ }),
-
-/***/ 431:
-/***/ (function(__unusedmodule, exports, __webpack_require__) {
-
-"use strict";
-
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
-    return result;
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const os = __importStar(__webpack_require__(87));
-const utils_1 = __webpack_require__(82);
-/**
- * Commands
- *
- * Command Format:
- *   ::name key=value,key=value::message
- *
- * Examples:
- *   ::warning::This is the message
- *   ::set-env name=MY_VAR::some value
- */
-function issueCommand(command, properties, message) {
-    const cmd = new Command(command, properties, message);
-    process.stdout.write(cmd.toString() + os.EOL);
-}
-exports.issueCommand = issueCommand;
-function issue(name, message = '') {
-    issueCommand(name, {}, message);
-}
-exports.issue = issue;
-const CMD_STRING = '::';
-class Command {
-    constructor(command, properties, message) {
-        if (!command) {
-            command = 'missing.command';
-        }
-        this.command = command;
-        this.properties = properties;
-        this.message = message;
-    }
-    toString() {
-        let cmdStr = CMD_STRING + this.command;
-        if (this.properties && Object.keys(this.properties).length > 0) {
-            cmdStr += ' ';
-            let first = true;
-            for (const key in this.properties) {
-                if (this.properties.hasOwnProperty(key)) {
-                    const val = this.properties[key];
-                    if (val) {
-                        if (first) {
-                            first = false;
-                        }
-                        else {
-                            cmdStr += ',';
-                        }
-                        cmdStr += `${key}=${escapeProperty(val)}`;
-                    }
-                }
-            }
-        }
-        cmdStr += `${CMD_STRING}${escapeData(this.message)}`;
-        return cmdStr;
-    }
-}
-function escapeData(s) {
-    return utils_1.toCommandValue(s)
-        .replace(/%/g, '%25')
-        .replace(/\r/g, '%0D')
-        .replace(/\n/g, '%0A');
-}
-function escapeProperty(s) {
-    return utils_1.toCommandValue(s)
-        .replace(/%/g, '%25')
-        .replace(/\r/g, '%0D')
-        .replace(/\n/g, '%0A')
-        .replace(/:/g, '%3A')
-        .replace(/,/g, '%2C');
-}
-//# sourceMappingURL=command.js.map
-
-/***/ }),
-
-/***/ 453:
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-var once = __webpack_require__(969)
-var eos = __webpack_require__(9)
-var fs = __webpack_require__(747) // we only need fs to get the ReadStream and WriteStream prototypes
-
-var noop = function () {}
-var ancient = /^v?\.0/.test(process.version)
-
-var isFn = function (fn) {
-  return typeof fn === 'function'
-}
-
-var isFS = function (stream) {
-  if (!ancient) return false // newer node version do not need to care about fs is a special way
-  if (!fs) return false // browser
-  return (stream instanceof (fs.ReadStream || noop) || stream instanceof (fs.WriteStream || noop)) && isFn(stream.close)
-}
-
-var isRequest = function (stream) {
-  return stream.setHeader && isFn(stream.abort)
-}
-
-var destroyer = function (stream, reading, writing, callback) {
-  callback = once(callback)
-
-  var closed = false
-  stream.on('close', function () {
-    closed = true
-  })
-
-  eos(stream, {readable: reading, writable: writing}, function (err) {
-    if (err) return callback(err)
-    closed = true
-    callback()
-  })
-
-  var destroyed = false
-  return function (err) {
-    if (closed) return
-    if (destroyed) return
-    destroyed = true
-
-    if (isFS(stream)) return stream.close(noop) // use close for fs streams to avoid fd leaks
-    if (isRequest(stream)) return stream.abort() // request.destroy just do .end - .abort is what we want
-
-    if (isFn(stream.destroy)) return stream.destroy()
-
-    callback(err || new Error('stream was destroyed'))
-  }
-}
-
-var call = function (fn) {
-  fn()
-}
-
-var pipe = function (from, to) {
-  return from.pipe(to)
-}
-
-var pump = function () {
-  var streams = Array.prototype.slice.call(arguments)
-  var callback = isFn(streams[streams.length - 1] || noop) && streams.pop() || noop
-
-  if (Array.isArray(streams[0])) streams = streams[0]
-  if (streams.length < 2) throw new Error('pump requires two streams per minimum')
-
-  var error
-  var destroys = streams.map(function (stream, i) {
-    var reading = i < streams.length - 1
-    var writing = i > 0
-    return destroyer(stream, reading, writing, function (err) {
-      if (!error) error = err
-      if (err) destroys.forEach(call)
-      if (reading) return
-      destroys.forEach(call)
-      callback(error)
-    })
-  })
-
-  return streams.reduce(pipe)
-}
-
-module.exports = pump
 
 
 /***/ }),
@@ -6019,7 +6026,7 @@ function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'defau
 var endpoint = __webpack_require__(385);
 var universalUserAgent = __webpack_require__(211);
 var isPlainObject = _interopDefault(__webpack_require__(548));
-var nodeFetch = _interopDefault(__webpack_require__(369));
+var nodeFetch = _interopDefault(__webpack_require__(454));
 var requestError = __webpack_require__(463);
 
 const VERSION = "5.3.4";
