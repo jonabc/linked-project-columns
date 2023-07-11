@@ -1,3 +1,7 @@
+[DEPRECATED]
+
+This project was designed to work with an older version of GitHub projects and will not work with the newer and better Projects feature.  This action has been deprecated and will receive no future updates.
+
 <p align="center">
   <a href="https://github.com/actions/typescript-action/actions"><img alt="typescript-action status" src="https://github.com/actions/typescript-action/workflows/build-test/badge.svg"></a>
 </p>
